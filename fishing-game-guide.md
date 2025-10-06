@@ -1,5 +1,6 @@
 # 🎣 Guide Complet du Mini-Jeu de Pêche
 
+
 ## 📋 Table des Matières
 - [Légende des Paramètres](#-légende-des-paramètres)
 - [Tableaux par Espèce](#-tableaux-par-espèce)
@@ -41,7 +42,7 @@
 | **Affinité morsure** | 50% | 70% | Mord facilement |
 | **Agressivité** | 30% | 50% | Moyennement curieuse |
 | **Flash** | 1.5s | 2.0s | Temps court |
-| **Pattern préféré** | **`moving`** | - | **Avance rapidement devant le poisson** |
+| **Pattern préféré** | **`devant`** | - | **Rester devant le poisson (20px/3s)** |
 | **Multiplicateur tension** | 0.36× | 0.44× | Très faible tension |
 
 **🎯 Stratégie** : Facile à attraper. Bouge vite l'appât de gauche à droite. Idéal pour débuter et gagner du temps rapidement.
@@ -61,7 +62,7 @@
 | **Affinité morsure** | 40% | 60% | Méfiant |
 | **Agressivité** | 40% | 60% | Équilibré |
 | **Flash** | 1.8s | 2.2s | Normal |
-| **Pattern préféré** | **`hover`** | - | **Reste sur le poisson pendant 3 secondes** |
+| **Pattern préféré** | **`au_dessus`** | - | **Rester au-dessus (20px/3s)** |
 | **Multiplicateur tension** | 0.48× | 0.56× | Faible tension |
 
 **🎯 Stratégie** : Approche l'hameçon du poisson et reste près de lui pendant 3 secondes sans bouger. Patience et proximité sont clés.
@@ -81,7 +82,7 @@
 | **Affinité morsure** | 30% | 50% | Méfiant |
 | **Agressivité** | 20% | 40% | Calme |
 | **Flash** | 2.0s | 2.5s | Long |
-| **Pattern préféré** | **`still`** | - | **Immobile au fond** |
+| **Pattern préféré** | **`toucher`** | - | **Curseur sur le poisson (3s)** |
 | **Multiplicateur tension** | 0.52× | 0.64× | Tension moyenne-basse |
 
 **🎯 Stratégie** : Laisse l'hameçon au fond et ne bouge plus. La patience est récompensée ! Attend qu'il s'approche et reste immobile.
@@ -121,7 +122,7 @@
 | **Affinité morsure** | 25% | 45% | Très méfiant |
 | **Agressivité** | 60% | 80% | Agressif |
 | **Flash** | 1.2s | 1.8s | Très court |
-| **Pattern préféré** | **`falling`** | - | **Coule à pic à proximité du poisson** |
+| **Pattern préféré** | **`au_dessous`** | - | **Rester au-dessous (20px/3s)** |
 | **Multiplicateur tension** | 0.56× | 0.72× | Tension moyenne |
 
 **🎯 Stratégie** : Approche l'hameçon du poisson et laisse-le couler rapidement vers lui. Mouvement vertical et rapide pour déclencher la morsure. Fenêtre de ferrage très courte (1.2-1.8s), réagis vite !
@@ -141,7 +142,7 @@
 | **Affinité morsure** | 20% | 40% | Très méfiant |
 | **Agressivité** | 30% | 50% | Calme |
 | **Flash** | 2.2s | 2.8s | Très long |
-| **Pattern préféré** | **`still`** | - | **Immobile au fond** |
+| **Pattern préféré** | **`derriere`** | - | **Rester derrière le poisson (20px/3s)** |
 | **Multiplicateur tension** | 0.60× | 0.80× | Tension forte |
 
 **🎯 Stratégie** : Laisse l'hameçon au fond et ne bouge plus. Combat long et difficile avec une stamina énorme. Gère bien la tension de la ligne !
@@ -161,7 +162,7 @@
 | **Affinité morsure** | 15% | 30% | Extrêmement méfiant |
 | **Agressivité** | 10% | 30% | Paisible |
 | **Flash** | 2.5s | 3.5s | Maximum |
-| **Pattern préféré** | **`hover`** | - | **Reste sur le poisson pendant 5 secondes** |
+| **Pattern préféré** | **`complete`** | - | **Couvrir les 4 quadrants en 3s** |
 | **Multiplicateur tension** | 0.90× | 1.0× | **TENSION MAXIMALE** |
 
 **🎯 Stratégie** : Approche l'hameçon du poisson et reste près de lui pendant 5 secondes sans bouger. Combat extrêmement difficile avec tension maximale. **Risque élevé de casser la ligne !** Gère parfaitement le rembobinage.
@@ -229,17 +230,20 @@
 
 ---
 
-## 🎣 Patterns d'Appât
+## 🎣 Patterns d'Appât (détection au curseur, 20px autour du poisson)
 
-### Description des Patterns Simplifiés
+Tous les patterns sont détectés via le CURSEUR de la souris. Ils doivent être réalisés dans un rayon de 20px autour du poisson ciblé pendant 3 secondes. Si le pattern correspond à celui préféré par l’espèce, la probabilité de morsure est portée à ≥ 90%.
 
-| Pattern | Description | Détection | Comment l'exécuter |
-|---------|-------------|-----------|-------------------|
-| **`still`** | Immobile au fond | Vitesse < 20 px/s + Profondeur > 80% | Laisse l'hameçon au fond sans bouger |
-| **`moving`** | Avance rapidement | Vitesse > 100 px/s | Bouge rapidement l'hameçon (rembobine vite) |
-| **`falling`** | Coule à pic | Mouvement vertical > 50 px + vitesse > 40 | Laisse l'hameçon couler rapidement vers le poisson |
-| **`hover`** | Reste sur le poisson | Vitesse < 30 px/s + 1+ seconde | Garde l'hameçon près du poisson pendant plusieurs secondes |
-| **`any`** | Pas de préférence | - | N'importe quel mouvement (bonus ×1.2) |
+### Description des 6 Patterns
+
+| Pattern | Description | Détection (curseur) | Exécution |
+|---------|-------------|---------------------|-----------|
+| **`devant`** | Curseur devant la direction du poisson | 20px/3s dans l’hémiplan avant du poisson | Reste devant le poisson qui avance |
+| **`derriere`** | Curseur derrière le poisson | 20px/3s dans l’hémiplan arrière | Reste derrière en le suivant |
+| **`au_dessus`** | Curseur au-dessus | 20px/3s avec y < y_poisson | Survole au-dessus |
+| **`au_dessous`** | Curseur au-dessous | 20px/3s avec y > y_poisson | Reste sous le poisson |
+| **`toucher`** | Curseur sur le poisson | 3s à ≤ 8px du centre | Pose le curseur dessus |
+| **`complete`** | Couverture complète | Avoir été au-dessus, au-dessous, gauche et droite dans les 3 dernières secondes | Balayer les 4 quadrants |
 
 ### Bonus de Pattern
 

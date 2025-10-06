@@ -128,6 +128,11 @@
         seabed: { height: 80, color: '#0f2a6b', decorCount: 20, emojis: ['🌿','🌾','🪸','🪨'] }
     };
 
+    // Remplacer les espèces par le catalogue externe s'il est présent
+    if (window.FISH_CATALOG && Array.isArray(window.FISH_CATALOG.types) && window.FISH_CATALOG.types.length > 0) {
+        GAME_CONFIG.fish.types = window.FISH_CATALOG.types;
+    }
+
     // Échelle de profondeur basée sur la fenêtre du navigateur
     let depthScale = {
         // Valeurs de référence en pixels pour une fenêtre de 1920x1080
@@ -200,11 +205,17 @@
         caughtFish: [], // liste des emojis des poissons capturés
         biggestCatch: null, // {emoji,name,size,estimatedWeight}
         progress: loadProgress(),
+        // Facteur de poids de l'hameçon (1 par défaut); surchargé par progression.features.hookWeightFactor
+        hookWeightFactor: 1,
+        // Effets visuels temporaires (ex: étincelles de pattern)
+        effects: [],
+        _hatSpawnAccumulator: 0,
         bottomHoldSeconds: 0,
         surfaceHoldSeconds: 0,
         _wasDeep: false,
         _wasNearSurface: false,
-        // Chapeaux
+        // Chapeaux flottants
+        floatingHats: [], // Liste des chapeaux qui flottent à la surface
         hatItems: [
             { emoji:'🎩', name:'Haut-de-forme', rarity:'rare', unlock:"Atteindre 5 000 pts cumulés", key:'score5000', perk:'+20% points pour tous les poissons' },
             { emoji:'🎓', name:'Diplôme', rarity:'rare', unlock:"Effectuer 300 lancers", key:'casts300', perk:'+15% précision de lancer' },
@@ -266,6 +277,11 @@
         hatSpawns: [], // objets spawnés dans l'eau {emoji,x,y,vx,vy}
     };
 
+    // Remplacer les chapeaux par le catalogue externe s'il est présent
+    if (window.HAT_CATALOG && Array.isArray(window.HAT_CATALOG.hats) && window.HAT_CATALOG.hats.length > 0) {
+        gameState.hatItems = window.HAT_CATALOG.hats;
+    }
+
     // Synchroniser totalWeight avec la progression sauvegardée
     if (gameState.progress?.stats?.cumulativeWeightKg) {
         gameState.totalWeight = gameState.progress.stats.cumulativeWeightKg * 1000; // Convertir kg en grammes
@@ -305,7 +321,7 @@
                 user-select: none;
                 resize: both;
                 overflow: hidden;
-                --uiScale: 1; /* Échelle UI responsive */
+                --uiScale: 0.8; /* Échelle UI responsive (réduit) */
                 font-family: 'Concert One', 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
             }
             
@@ -362,9 +378,9 @@
                 bottom: 8px;
                 left: 50%;
                 transform: translateX(-50%);
-                font-size: 16px;
-                padding: 8px 16px;
-                border-radius: 8px;
+                font-size: 14px;
+                padding: 6px 12px;
+                border-radius: 6px;
                 background: rgba(0,0,0,0.2);
                 color: #fff;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -372,9 +388,9 @@
                 z-index: 10000;
                 display: block;
                 width: auto;
-                min-width: 300px;
+                min-width: 240px;
                 max-width: 85%;
-                height: 45px;
+                height: 36px;
                 box-sizing: border-box;
             }
             .fishing-timer-display .timer-row {
@@ -389,7 +405,7 @@
             .fishing-timer-display .scores-inline {
                 display: flex; 
                 gap: 8px;
-                font-size: 14px;
+                font-size: 12px;
                 opacity: 0.95;
             }
             .fishing-score-corner { display:flex; }
@@ -402,11 +418,11 @@
                 background: linear-gradient(45deg, #10b981, #059669);
                 color: white;
                 border: none;
-                padding: clamp(8px, calc(10px * var(--uiScale)), 14px) clamp(14px, calc(20px * var(--uiScale)), 26px);
-                font-size: clamp(14px, calc(16px * var(--uiScale)), 18px);
-                border-radius: calc(10px * var(--uiScale));
-                min-height: 40px;
-                min-width: 170px;
+                padding: clamp(6px, calc(8px * var(--uiScale)), 12px) clamp(10px, calc(16px * var(--uiScale)), 20px);
+                font-size: clamp(13px, calc(15px * var(--uiScale)), 17px);
+                border-radius: calc(8px * var(--uiScale));
+                min-height: calc(36px * var(--uiScale));
+                min-width: calc(140px * var(--uiScale));
                 cursor: pointer;
                 box-shadow: 0 4px 15px rgba(16, 185, 129, 0.5);
                 transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -431,11 +447,11 @@
                 background: linear-gradient(45deg, #ef4444, #dc2626);
                 color: white;
                 box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
-                padding: clamp(8px, calc(10px * var(--uiScale)), 14px) clamp(14px, calc(20px * var(--uiScale)), 26px);
-                font-size: clamp(14px, calc(16px * var(--uiScale)), 18px);
-                border-radius: calc(10px * var(--uiScale));
-                min-height: 40px;
-                min-width: 170px;
+                padding: clamp(6px, calc(8px * var(--uiScale)), 12px) clamp(10px, calc(16px * var(--uiScale)), 20px);
+                font-size: clamp(13px, calc(15px * var(--uiScale)), 17px);
+                border-radius: calc(8px * var(--uiScale));
+                min-height: calc(36px * var(--uiScale));
+                min-width: calc(140px * var(--uiScale));
             }
 
             .fishing-btn-secondary:hover {
@@ -602,15 +618,6 @@
             // Mettre à jour les tailles maximales
             container.style.maxWidth = maxSize.width + 'px';
             container.style.maxHeight = maxSize.height + 'px';
-            
-            // Redimensionner la fenêtre si elle est plus petite que la nouvelle taille maximale
-            const currentWidth = parseInt(container.style.width) || container.offsetWidth;
-            const currentHeight = parseInt(container.style.height) || container.offsetHeight;
-            
-            if (currentWidth < maxSize.width || currentHeight < maxSize.height) {
-                container.style.width = maxSize.width + 'px';
-                container.style.height = maxSize.height + 'px';
-            }
         }
     }
 
@@ -631,12 +638,277 @@
         // Calculer le ratio de progression (0 à 1)
         const progress = Math.min(1, currentWeight / maxWeight);
         
-        // Interpolation linéaire entre la taille de base et la taille maximale du navigateur
-        const currentWidth = Math.round(baseWidth + (browserMaxWidth - baseWidth) * progress);
-        const currentHeight = Math.round(baseHeight + (browserMaxHeight - baseHeight) * progress);
+        // Courbe de décroissance exponentielle : plus de progression au début, moins à la fin
+        // Utilise une fonction exponentielle inverse : 1 - e^(-k*x) où k contrôle la pente
+        const k = 3; // Facteur de décroissance (plus k est grand, plus la progression est rapide au début)
+        const exponentialProgress = 1 - Math.exp(-k * progress);
+        
+        // Interpolation basée sur la courbe exponentielle
+        const currentWidth = Math.round(baseWidth + (browserMaxWidth - baseWidth) * exponentialProgress);
+        const currentHeight = Math.round(baseHeight + (browserMaxHeight - baseHeight) * exponentialProgress);
         
         
         return { width: currentWidth, height: currentHeight };
+    }
+
+    // Fonction pour faire spawner un chapeau flottant à la surface
+    function spawnFloatingHat(emoji) {
+        const canvas = document.querySelector('.fishing-game-canvas');
+        if (!canvas) return;
+        
+        const hat = {
+            emoji: emoji,
+            x: Math.random() * (canvas.width - 60) + 30, // Position aléatoire sur la largeur
+            y: 50, // Surface de l'eau
+            vx: (Math.random() - 0.5) * 20, // Vitesse horizontale aléatoire
+            vy: 0, // Pas de vitesse verticale initiale
+            bobPhase: Math.random() * Math.PI * 2, // Phase pour le mouvement de flottement
+            bobSpeed: 0.02 + Math.random() * 0.01, // Vitesse de flottement
+            bobAmplitude: 3 + Math.random() * 2, // Amplitude du flottement
+            size: 24 + Math.random() * 8, // Taille légèrement variable
+            collected: false,
+            collectionTimer: 0
+        };
+        
+        gameState.floatingHats.push(hat);
+        console.log(`[Chapeau] ${emoji} spawné à la surface`);
+    }
+
+    // Fonction pour mettre à jour la physique des chapeaux flottants
+    function updateFloatingHats(deltaSec, canvas) {
+        gameState.floatingHats.forEach((hat, index) => {
+            if (hat.collected) {
+                hat.collectionTimer += deltaSec;
+                if (hat.collectionTimer > 1.0) { // Disparaît après 1 seconde
+                    gameState.floatingHats.splice(index, 1);
+                }
+                return;
+            }
+            
+            // Mouvement de flottement vertical
+            hat.bobPhase += hat.bobSpeed * deltaSec * 60;
+            const waterLevel = GAME_CONFIG.water.level;
+            hat.y = waterLevel + Math.sin(hat.bobPhase) * hat.bobAmplitude; // à la ligne de surface
+            
+            // Mouvement horizontal (dérive)
+            hat.x += hat.vx * deltaSec;
+            
+            // Rebond sur les bords
+            if (hat.x < 30) {
+                hat.x = 30;
+                hat.vx = Math.abs(hat.vx);
+            } else if (hat.x > canvas.width - 30) {
+                hat.x = canvas.width - 30;
+                hat.vx = -Math.abs(hat.vx);
+            }
+            
+            // Légère friction
+            hat.vx *= 0.98;
+        });
+    }
+
+    // Fonction pour vérifier la collision entre l'hameçon et les chapeaux
+    function checkHatCollision() {
+        if (!gameState.hookPosition) return;
+        
+        gameState.floatingHats.forEach((hat, index) => {
+            if (hat.collected) return;
+            
+            const distance = Math.hypot(
+                gameState.hookPosition.x - hat.x,
+                gameState.hookPosition.y - hat.y
+            );
+            
+            if (distance < 25) { // Distance de collision
+                collectHat(hat, index);
+            }
+        });
+    }
+
+    // Fonction pour collecter un chapeau
+    function collectHat(hat, index) {
+        hat.collected = true;
+        hat.collectionTimer = 0;
+        
+        // Ajouter le chapeau à la collection du joueur
+        const hats = gameState.progress.hats || { unlocked:[], owned:[], equipped:null };
+        if (!hats.owned) hats.owned = [];
+        if (!hats.owned.includes(hat.emoji)) {
+            hats.owned.push(hat.emoji);
+        }
+        
+        // Sauvegarder la progression
+        saveProgress();
+        
+        // Afficher une notification
+        showUnlockToast(hat.emoji, 'Chapeau collecté !');
+        
+        console.log(`[Chapeau] ${hat.emoji} collecté par le joueur`);
+    }
+
+    // Fonction pour dessiner les chapeaux flottants
+    function drawFloatingHats(ctx, canvas) {
+        gameState.floatingHats.forEach(hat => {
+            if (hat.collected) {
+                // Animation de collection (scaling et fade)
+                const progress = Math.min(1, hat.collectionTimer);
+                const scale = 1 + progress * 0.5;
+                const alpha = 1 - progress;
+                
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = `${hat.size * scale}px sans-serif`;
+                ctx.fillText(hat.emoji, hat.x, hat.y);
+                ctx.restore();
+            } else {
+                // Rendu normal
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = `${hat.size}px sans-serif`;
+                ctx.fillText(hat.emoji, hat.x, hat.y);
+                ctx.restore();
+            }
+        });
+    }
+
+    // Fonction pour équiper un chapeau
+    function equipHat(hatEmoji) {
+        const hats = gameState.progress.hats || { unlocked:[], owned:[], equipped:null };
+        if (hats.owned && hats.owned.includes(hatEmoji)) {
+            hats.equipped = hatEmoji;
+            saveProgress();
+            showUnlockToast(hatEmoji, 'Chapeau équipé !');
+            console.log(`[Chapeau] ${hatEmoji} équipé`);
+        }
+    }
+
+    // Fonction pour déséquiper le chapeau actuel
+    function unequipHat() {
+        const hats = gameState.progress.hats || { unlocked:[], owned:[], equipped:null };
+        hats.equipped = null;
+        saveProgress();
+        console.log('[Chapeau] Chapeau déséquipé');
+    }
+
+    // Fonction pour afficher le menu de sélection de chapeaux
+    function showHatSelectionMenu() {
+        const ownedHats = gameState.progress?.hats?.owned || [];
+        const equippedHat = gameState.progress?.hats?.equipped;
+        
+        if (ownedHats.length === 0) {
+            showUnlockToast('🎩', 'Aucun chapeau collecté');
+            return;
+        }
+        
+        // Créer la fenêtre de sélection
+        const menu = document.createElement('div');
+        menu.className = 'hat-selection-menu';
+        menu.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, rgba(15, 42, 107, 0.98), rgba(30, 58, 138, 0.98));
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 10007;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+            border: 3px solid rgba(16, 185, 129, 0.3);
+            backdrop-filter: blur(10px);
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        `;
+        
+        menu.innerHTML = `
+            <h2 style="margin: 0 0 20px 0; color: #10b981; font-size: 28px;">🎩 Chapeaux Collectés</h2>
+            <div style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin: 20px 0;">
+                ${ownedHats.map(hatEmoji => {
+                    const isEquipped = hatEmoji === equippedHat;
+                    return `
+                        <div class="hat-item" style="
+                            background: ${isEquipped ? 'linear-gradient(45deg, #10b981, #059669)' : 'rgba(255,255,255,0.1)'};
+                            padding: 15px;
+                            border-radius: 12px;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            border: 2px solid ${isEquipped ? '#10b981' : 'transparent'};
+                            min-width: 80px;
+                        " data-hat="${hatEmoji}">
+                            <div style="font-size: 32px; margin-bottom: 8px;">${hatEmoji}</div>
+                            <div style="font-size: 12px; opacity: 0.8;">
+                                ${isEquipped ? 'ÉQUIPÉ' : 'Cliquer pour équiper'}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+            <div style="margin-top: 20px;">
+                <button id="unequip-hat-btn" style="
+                    background: linear-gradient(45deg, #ef4444, #dc2626);
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    margin-right: 10px;
+                    font-size: 14px;
+                ">Déséquiper</button>
+                <button id="close-hat-menu-btn" style="
+                    background: linear-gradient(45deg, #6b7280, #4b5563);
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">Fermer</button>
+            </div>
+        `;
+        
+        document.body.appendChild(menu);
+        
+        // Gestionnaires d'événements
+        menu.querySelectorAll('.hat-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const hatEmoji = item.dataset.hat;
+                equipHat(hatEmoji);
+                menu.remove();
+            });
+            
+            item.addEventListener('mouseenter', () => {
+                if (item.dataset.hat !== equippedHat) {
+                    item.style.transform = 'scale(1.05)';
+                    item.style.boxShadow = '0 8px 25px rgba(16, 185, 129, 0.4)';
+                }
+            });
+            
+            item.addEventListener('mouseleave', () => {
+                item.style.transform = 'scale(1)';
+                item.style.boxShadow = 'none';
+            });
+        });
+        
+        document.getElementById('unequip-hat-btn').addEventListener('click', () => {
+            unequipHat();
+            menu.remove();
+        });
+        
+        document.getElementById('close-hat-menu-btn').addEventListener('click', () => {
+            menu.remove();
+        });
+        
+        // Fermer en cliquant à l'extérieur
+        menu.addEventListener('click', (e) => {
+            if (e.target === menu) {
+                menu.remove();
+            }
+        });
     }
 
     // Fonction pour calculer le nombre maximum de poissons basé sur l'aire de la fenêtre
@@ -715,10 +987,16 @@
                         <div>Poids: <span id="fishing-weight">0g</span></div>
                     </div>
                     <button id="fishing-guide-btn" class="fishing-btn-primary" title="Guide" aria-label="Guide" style="min-width:auto;min-height:auto;padding:4px 8px;font-size:16px;margin-left:12px;cursor:pointer;">📙</button>
-                    <button id="fishing-cookie-btn" class="fishing-btn-primary" title="Gestionnaire de Cookies" aria-label="Gestionnaire de Cookies" style="min-width:auto;min-height:auto;padding:4px 8px;font-size:16px;margin-left:8px;cursor:pointer;">🔧</button>
                 </div>
             </div>
             
+            <!-- Slider de poids d'hameçon en overlay côté gauche, aligné verticalement comme la jauge de profondeur -->
+            <div id="hook-weight-slider-wrap" style="display:none; position:absolute; left:8px; top:50%; transform:translateY(-50%); width:36px; height:160px; z-index:10001; align-items:center; justify-content:center;">
+                <div title="Poids de l'hameçon" style="position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:12px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);">🪝</div>
+                <input id="hook-weight-slider" type="range" min="0.5" max="1.2" step="0.1" value="${(Math.max(0.5, Math.min(1.2, gameState.progress?.features?.hookWeightFactor||1)))}" style="-webkit-appearance: none; appearance: none; position:absolute; left:50%; top:50%; transform: translate(-50%, -50%) rotate(-90deg); width:140px; height:6px; border-radius:4px; background:linear-gradient(90deg,#fca5a5,#ef4444); outline:none;">
+                <div id="hook-weight-value" style="position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:11px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);">${(gameState.progress?.features?.hookWeightFactor||1).toFixed(1)}×</div>
+            </div>
+
             <div id="fishing-score-corner" class="fishing-score-corner">
                 <div>Score: <span id="fishing-score">0</span></div>
                 <div>Meilleur: <span id="fishing-high-score">${gameState.highScore}</span></div>
@@ -767,29 +1045,84 @@
         // Bouton guide
         const guideBtn = container.querySelector('#fishing-guide-btn');
         if (guideBtn) guideBtn.addEventListener('click', showGuide);
+
+        // Initialiser le slider de poids d'hameçon si débloqué
+        const features = gameState.progress.features || (gameState.progress.features = { hookWeightUnlocked:false, hookWeightFactor:1 });
+        const sliderWrap = container.querySelector('#hook-weight-slider-wrap');
+        const slider = container.querySelector('#hook-weight-slider');
+        const sliderVal = container.querySelector('#hook-weight-value');
+        if (sliderWrap && slider && sliderVal) {
+            if (features.hookWeightUnlocked) {
+                sliderWrap.style.display = 'inline-flex';
+            }
+            const current = Math.max(0.5, Math.min(1.2, Number(features.hookWeightFactor || 1)));
+            slider.value = String(current);
+            sliderVal.textContent = `${current.toFixed(1)}×`;
+            gameState.hookWeightFactor = current;
+            slider.addEventListener('input', () => {
+                const v = Math.max(0.5, Math.min(1.2, Number(slider.value)));
+                gameState.hookWeightFactor = v;
+                features.hookWeightFactor = v;
+                sliderVal.textContent = `${v.toFixed(1)}×`;
+                saveProgress();
+            });
+        }
         
-        // Bouton gestionnaire de cookies
-        const cookieBtn = container.querySelector('#fishing-cookie-btn');
-        if (cookieBtn) cookieBtn.addEventListener('click', showCookieManager);
+        // Créer le bouton gestionnaire de cookies en dehors du conteneur (sur le fond)
+        let floatingCookieBtn = document.getElementById('fishing-cookie-floating-btn');
+        if (!floatingCookieBtn) {
+            floatingCookieBtn = document.createElement('button');
+            floatingCookieBtn.id = 'fishing-cookie-floating-btn';
+            floatingCookieBtn.title = 'Gestionnaire de Cookies';
+            floatingCookieBtn.setAttribute('aria-label', 'Gestionnaire de Cookies');
+            floatingCookieBtn.textContent = '🔧';
+            floatingCookieBtn.style.position = 'fixed';
+            floatingCookieBtn.style.zIndex = '9000'; /* sous le conteneur (9999), mais visible */
+            floatingCookieBtn.style.background = 'linear-gradient(45deg, #10b981, #059669)';
+            floatingCookieBtn.style.color = 'white';
+            floatingCookieBtn.style.border = 'none';
+            floatingCookieBtn.style.padding = '6px 10px';
+            floatingCookieBtn.style.fontSize = '16px';
+            floatingCookieBtn.style.borderRadius = '10px';
+            floatingCookieBtn.style.boxShadow = '0 4px 12px rgba(16,185,129,0.45)';
+            floatingCookieBtn.style.cursor = 'pointer';
+            floatingCookieBtn.style.opacity = '0.95';
+            document.body.appendChild(floatingCookieBtn);
+            floatingCookieBtn.addEventListener('click', showCookieManager);
+        }
+
+        // Positionner le bouton flottant aligné avec le cartouche UI (timer centré en bas)
+        const positionFloatingCookieBtn = () => {
+            const rect = container.getBoundingClientRect();
+            const timerHeight = 36; // hauteur CSS réduite du timer
+            const bottomPadding = 8; // comme dans le CSS du timer
+            const btnRect = floatingCookieBtn.getBoundingClientRect();
+            const btnHalfH = btnRect.height ? btnRect.height / 2 : 16;
+            const y = rect.bottom - bottomPadding - (timerHeight / 2) - btnHalfH + window.scrollY;
+            const x = rect.right + 10 + window.scrollX; // à droite du conteneur
+            floatingCookieBtn.style.top = `${Math.max(10, y)}px`;
+            floatingCookieBtn.style.left = `${x}px`;
+        };
+
+        // Mettre à jour la position régulièrement et sur resize/scroll
+        positionFloatingCookieBtn();
+        window.addEventListener('resize', positionFloatingCookieBtn);
+        window.addEventListener('scroll', positionFloatingCookieBtn, { passive: true });
+        const posInterval = setInterval(() => {
+            if (!document.body.contains(container) || !document.body.contains(floatingCookieBtn)) {
+                clearInterval(posInterval);
+                return;
+            }
+            positionFloatingCookieBtn();
+        }, 150);
         
         // Calculer le nombre maximum de poissons initial même sans restauration
         setTimeout(() => {
             const initialMaxCount = calculateMaxFishCount();
-            
-            // Appliquer la taille maximale basée sur le poids total
+            // Mettre uniquement à jour les limites max, pas la taille définie par l'utilisateur
             const maxSize = calculateMaxWindowSize();
             container.style.maxWidth = maxSize.width + 'px';
             container.style.maxHeight = maxSize.height + 'px';
-            
-            // Si le poids total est suffisant, redimensionner la fenêtre
-            if (gameState.totalWeight > 0) {
-                const currentWeight = Math.max(gameState.totalWeight, (gameState.progress?.stats?.cumulativeWeightKg || 0) * 1000);
-                if (currentWeight > 0) {
-                    container.style.width = maxSize.width + 'px';
-                    container.style.height = maxSize.height + 'px';
-                }
-            }
-            
         }, 100);
         
         return container;
@@ -1791,11 +2124,29 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.globalAlpha = 1;
-            const hatSize = 28; // Taille légèrement plus petite que le pêcheur
+            const hatSize = 20;
             ctx.font = `${hatSize}px sans-serif`;
-            // Positionner le chapeau au-dessus de la tête du pêcheur
-            ctx.fillText(equippedHat, rodX + 8, rodY - 8);
+            // Positionner et appliquer une rotation de +25°
+            ctx.translate(rodX + 8, rodY - 15);
+            ctx.rotate(25 * Math.PI / 180);
+            ctx.fillText(equippedHat, 0, 0);
             ctx.restore();
+        }
+        
+        // Afficher un indicateur de chapeaux disponibles (petit icône)
+        const ownedHats = gameState.progress?.hats?.owned || [];
+        if (ownedHats.length > 0) {
+            ctx.save();
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.globalAlpha = 0.8;
+            ctx.font = '16px sans-serif';
+            ctx.fillStyle = '#fff';
+            ctx.fillText(`🎩 ${ownedHats.length}`, rodX + 50, rodY - 20);
+            ctx.restore();
+            
+            // Stocker la position pour la détection de clic
+            gameState.hatIndicatorPos = { x: rodX + 50, y: rodY - 20, width: 60, height: 20 };
         }
 
         // Canne
@@ -1827,7 +2178,13 @@
             const dist = Math.hypot(dx, dy);
             const tension = Math.max(0, Math.min(1, gameState.lineTension || 0));
             // La courbure diminue avec la tension (ligne plus droite quand tendue)
-            const baseSag = Math.min(40, dist * 0.12) * (end.y > GAME_CONFIG.water.level ? 1.2 : 0.6);
+            // Courbure de la ligne: accentuer légèrement selon le poids de l'hameçon sous l'eau
+            const isUnder = end.y > GAME_CONFIG.water.level;
+            let baseSag = Math.min(40, dist * 0.12) * (isUnder ? 1.2 : 0.6);
+            if (isUnder) {
+                const weight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+                baseSag *= (1 + 0.20 * (weight - 1));
+            }
             const sag = baseSag * (1 - tension * 0.8); // 20% de courbure max quand très tendu
             const ctrl1 = { x: start.x + dx * 0.33, y: start.y + dy * 0.33 + sag };
             const ctrl2 = { x: start.x + dx * 0.66, y: start.y + dy * 0.66 + sag };
@@ -1879,7 +2236,10 @@
             const dx = hx - startX, dy = hy - startY;
             const d = Math.hypot(dx, dy) || 1;
             const ux = dx / d, uy = dy / d;
-            const anchorBack = GAME_CONFIG.hook.size * -0.2; // davantage vers la gauche
+            // Mise à l'échelle visuelle de l'hameçon en fonction du poids (slider)
+            const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+            const hookScale = hookWeight; // échelle 1:1 par simplicité et lisibilité
+            const anchorBack = (GAME_CONFIG.hook.size * hookScale) * -0.2; // davantage vers la gauche
             const angle = Math.atan2(dy, dx);
             ctx.save();
             ctx.translate(hx, hy);
@@ -1890,7 +2250,7 @@
             ctx.translate(-anchorBack, 0); // reculer pour que l'anneau colle au point d'ancrage
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const fontSize = Math.max(14, Math.floor(GAME_CONFIG.hook.size * 2.6));
+            const fontSize = Math.max(14, Math.floor(GAME_CONFIG.hook.size * hookScale * 2.6));
             ctx.font = `${fontSize}px sans-serif`;
             // Forcer un rendu 100% opaque sans effets
             ctx.globalAlpha = 1;
@@ -1925,6 +2285,122 @@
                 ctx.restore();
             } else {
                 drawSingleFish(ctx, fish.x, fish.y, fish.size, emoji, ang);
+            }
+
+            // Debug visuel: quadrants et cercle de détection
+            if (gameState.debugQuadrants) {
+                ctx.save();
+                ctx.globalAlpha = 0.25;
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(fish.x - 40, fish.y);
+                ctx.lineTo(fish.x + 40, fish.y);
+                ctx.moveTo(fish.x, fish.y - 40);
+                ctx.lineTo(fish.x, fish.y + 40);
+                ctx.stroke();
+                // Cercle de proximité (rayon 28)
+                ctx.globalAlpha = 0.18;
+                ctx.beginPath();
+                ctx.arc(fish.x, fish.y, 28, 0, Math.PI * 2);
+                ctx.fillStyle = '#3b82f6';
+                ctx.fill();
+
+                // Dessiner le cadran ACTIF selon la position du curseur
+                const mx = gameState.mouseX ?? 0;
+                const my = gameState.mouseY ?? 0;
+                const dx = mx - fish.x;
+                const dy = my - fish.y;
+                const r = 28;
+                // Choisir l'axe dominant (horizontal vs vertical)
+                const horiz = Math.abs(dx) >= Math.abs(dy);
+                let dir = null;
+                if (horiz) {
+                    if (dx <= -2) dir = 'left'; else if (dx >= 2) dir = 'right';
+                } else {
+                    if (dy <= -2) dir = 'up'; else if (dy >= 2) dir = 'down';
+                }
+                if (dir) {
+                    ctx.globalAlpha = 0.16;
+                    ctx.fillStyle = '#f59e0b';
+                    if (dir === 'up')      ctx.fillRect(fish.x - r, fish.y - r, r*2, r);
+                    else if (dir === 'down') ctx.fillRect(fish.x - r, fish.y, r*2, r);
+                    else if (dir === 'left') ctx.fillRect(fish.x - r, fish.y - r, r, r*2);
+                    else if (dir === 'right')ctx.fillRect(fish.x, fish.y - r, r, r*2);
+                    // Petite flèche au centre
+                    ctx.globalAlpha = 0.9;
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.font = '12px sans-serif';
+                    const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : dir === 'left' ? '←' : '→';
+                    ctx.fillText(arrow, fish.x, fish.y - (dir==='up'?10:dir==='down'?-10:0));
+                }
+
+                // Rayon de l'hameçon (150px) autour du poisson
+                const hx = gameState.hookPosition?.x ?? -9999;
+                const hy = gameState.hookPosition?.y ?? -9999;
+                const dh = Math.hypot(hx - fish.x, hy - fish.y);
+                ctx.globalAlpha = 0.15;
+                ctx.beginPath();
+                ctx.arc(fish.x, fish.y, 150, 0, Math.PI * 2);
+                ctx.strokeStyle = dh <= 150 ? '#ef4444' : '#22c55e'; // rouge si le hook est dans le rayon, vert sinon
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Afficher le temps restant pour valider le pattern (estimation locale)
+                try {
+                    const history = gameState.cursorMovementHistory || [];
+                    const nowTs = performance.now();
+                    const windowMs = 3500;
+                    const samples = history.filter(h => nowTs - h.ts <= windowMs);
+                    let fx = 1, fy = 0;
+                    if (typeof fish.angle === 'number') { fx = Math.cos(fish.angle); fy = Math.sin(fish.angle); }
+                    const nearRadius = 28;
+                    let msAbove = 0, msBelow = 0, msLeft = 0, msRight = 0, msFront = 0, msBack = 0;
+                    for (let i = 1; i < samples.length; i++) {
+                        const a = samples[i-1], b = samples[i];
+                        const dt = Math.max(0, b.ts - a.ts);
+                        if (dt <= 0) continue;
+                        const ddx = (b.x - fish.x); const ddy = (b.y - fish.y);
+                        const dist = Math.hypot(ddx, ddy);
+                        if (dist > nearRadius) continue;
+                        if (b.y <= fish.y - 2) msAbove += dt; else if (b.y >= fish.y + 2) msBelow += dt;
+                        if (b.x <= fish.x - 2) msLeft += dt; else if (b.x >= fish.x + 2) msRight += dt;
+                        const dot = ddx * fx + ddy * fy;
+                        if (dot >= 0) msFront += dt; else msBack += dt;
+                    }
+                    const needed = 1000;
+                    let activeType = 'unknown';
+                    let spent = 0;
+                    if (msFront >= msBack + 200 && msFront >= msAbove && msFront >= msBelow) { activeType = 'devant'; spent = msFront; }
+                    else if (msBack >= msFront + 200 && msBack >= msAbove && msBack >= msBelow) { activeType = 'derriere'; spent = msBack; }
+                    else if (msAbove >= msBelow + 200 && msAbove >= msFront && msAbove >= msBack) { activeType = 'au_dessus'; spent = msAbove; }
+                    else if (msBelow >= msAbove + 200 && msBelow >= msFront && msBelow >= msBack) { activeType = 'au_dessous'; spent = msBelow; }
+                    const remaining = Math.max(0, needed - spent);
+                    ctx.save();
+                    ctx.globalAlpha = 0.95;
+                    ctx.fillStyle = remaining === 0 ? '#10b981' : '#fde68a';
+                    ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    const label = remaining === 0 ? 'OK' : `${(remaining/1000).toFixed(1)}s`;
+                    ctx.fillText(label, fish.x, fish.y - r - 6);
+                    ctx.restore();
+
+                    // Trait rouge entre l'hameçon et le poisson si le pattern actuel correspond à son baitPattern
+                    const detected = activeType;
+                    if (detected !== 'unknown' && fish.baitPattern === detected) {
+                        ctx.save();
+                        ctx.globalAlpha = 0.8;
+                        ctx.strokeStyle = '#ef4444';
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(fish.x, fish.y);
+                        ctx.lineTo(hx, hy);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                } catch (e) {}
+                ctx.restore();
             }
         });
         // Dessiner les poissons attachés au hook
@@ -2001,14 +2477,26 @@
             const availableTypes = GAME_CONFIG.fish.types.filter(t => unlocked.has(t.emoji));
             const pool = availableTypes.length > 0 ? availableTypes : GAME_CONFIG.fish.types.filter(t=>['🦐','🐟'].includes(t.emoji));
             
-            // Forcer spawn de sirènes avec chapeau 👹
+            // Calculer la profondeur disponible AVANT de choisir l'espèce
+            const waterLevel = GAME_CONFIG.water.level;
+            const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
+            const waterDepth = seabedY - waterLevel;
+
+            // Restreindre la pool aux espèces compatibles avec la profondeur actuelle
+            const depthCompatiblePool = pool.filter(t => canFishSpawnInDepth(t, waterDepth));
+            if (depthCompatiblePool.length === 0) {
+                // Si rien n'est compatible, on passe cette itération pour éviter des spawns hors zone
+                continue;
+            }
+
+            // Forcer spawn de sirènes avec chapeau 👹 (dans la pool compatible seulement)
             let fishType;
             if (perks.forceSirenSpawn && Math.random() < 0.5) {
-                const sirenTypes = pool.filter(t => ['🧜‍♀️', '🧜‍♂️'].includes(t.emoji));
-                fishType = sirenTypes.length > 0 ? sirenTypes[Math.floor(Math.random() * sirenTypes.length)] : pool[Math.floor(Math.random() * pool.length)];
+                const sirenTypes = depthCompatiblePool.filter(t => ['🧜‍♀️', '🧜‍♂️'].includes(t.emoji));
+                fishType = sirenTypes.length > 0 ? sirenTypes[Math.floor(Math.random() * sirenTypes.length)] : depthCompatiblePool[Math.floor(Math.random() * depthCompatiblePool.length)];
             } else {
                 // Appliquer les bonus de spawn pour espèces spécifiques
-                let weights = pool.map(t => {
+                let weights = depthCompatiblePool.map(t => {
                     let weight = 1.0;
                     if (t.emoji === '🪼' && perks.jellyfishSpawnRate) weight *= perks.jellyfishSpawnRate;
                     if (t.emoji === '🦐' && perks.shrimpSpawnRate) weight *= perks.shrimpSpawnRate;
@@ -2026,7 +2514,7 @@
                     rand -= weights[i];
                     if (rand <= 0) { idx = i; break; }
                 }
-                fishType = pool[idx];
+                fishType = depthCompatiblePool[idx];
             }
             
             // Générer des caractéristiques aléatoires dans les plages définies
@@ -2068,10 +2556,7 @@
             // Points basés sur la taille
             const points = Math.round(fishType.basePoints + size * fishType.pointsPerSize);
             
-            // Profondeur de spawn basée sur des pixels fixes avec clamp
-            const waterLevel = GAME_CONFIG.water.level;
-            const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
-            const waterDepth = seabedY - waterLevel;
+            // Profondeur de spawn basée sur des pixels fixes avec clamp (déjà calculée ci-dessus)
             
             // Vérifier si le poisson peut spawner dans la profondeur disponible
             if (!canFishSpawnInDepth(fishType, waterDepth)) {
@@ -2297,138 +2782,139 @@
     }
 
     // Fonction pour vérifier les collisions avec l'hameçon
-    // Fonction pour analyser le pattern de mouvement de l'hameçon
-    function analyzeBaitPattern() {
-        const history = gameState.hookMovementHistory;
-        if (history.length < 10) return { type: 'unknown', score: 0 };
+    // Fonction pour analyser le pattern de mouvement du curseur
+    function analyzeBaitPattern(targetFishOverride) {
+        // Nouvelle mécanique: 6 patterns à 20px autour du poisson, maintien 3s
+        // Patterns: 'devant', 'derriere', 'au_dessus', 'au_dessous', 'toucher', 'complete'
+        const history = gameState.cursorMovementHistory || [];
+        if (!history.length) return { type: 'unknown', score: 0 };
         
-        const recent = history.slice(-30); // 0.5 sec d'historique
-        const avgSpeed = recent.reduce((sum, m) => sum + m.speed, 0) / recent.length;
-        const verticalMovement = recent.reduce((sum, m) => sum + m.dy, 0);
-        const totalMovement = recent.reduce((sum, m) => sum + Math.abs(m.dx) + Math.abs(m.dy), 0);
+        // Sélection du poisson cible
+        let targetFish = targetFishOverride || (gameState.pendingBiteFish ? gameState.pendingBiteFish.fish : null);
+        if (!targetFish) {
+            let best = null; let bestD = Infinity;
+            const mx = gameState.mouseX || 0; const my = gameState.mouseY || 0;
+            for (const f of gameState.fish) {
+                if (f.caught) continue;
+                const d = Math.hypot(mx - f.x, my - f.y);
+                if (d < bestD) { bestD = d; best = f; }
+            }
+            targetFish = best;
+        }
+        if (!targetFish) return { type: 'unknown', score: 0 };
         
-        // Position actuelle de l'hameçon
-        const hookY = gameState.hookPosition.y;
-        const waterLevel = GAME_CONFIG.water.level;
-        const canvas = document.getElementById('fishing-canvas');
-        const seabedY = canvas.height - GAME_CONFIG.seabed.height;
-        const waterDepth = seabedY - waterLevel;
+        // Historique des 3 dernières secondes (élargi si nécessaire)
+        const nowTs = performance.now();
+        const windowMs = 3500;
+        const samples = history.filter(h => nowTs - h.ts <= windowMs);
+        if (samples.length < 2) return { type: 'unknown', score: 0 };
         
-        // Calculer la profondeur relative basée sur des pixels absolus (0 = surface, 1 = fond)
-        const screenHeight = canvas.height;
-        const depthFromSurface = hookY - waterLevel;
-        const depthRatio = Math.max(0, Math.min(1, depthFromSurface / screenHeight));
+        // Paramètres (tolérance un peu augmentée pour fiabilité)
+        const nearRadius = 28;
         
-        // Détecter le pattern dominant - 10 patterns disponibles
-        let detectedPattern = 'unknown';
+        // Direction du poisson pour devant/derrière
+        let fx = 1, fy = 0;
+        if (typeof targetFish.angle === 'number') {
+            fx = Math.cos(targetFish.angle);
+            fy = Math.sin(targetFish.angle);
+        } else {
+            const vLen = Math.hypot(targetFish.vx||0, targetFish.vy||0) || 1;
+            fx = (targetFish.vx||0) / vLen; fy = (targetFish.vy||0) / vLen;
+        }
+        
+        // Accumulateurs
+        let msAbove = 0, msBelow = 0, msLeft = 0, msRight = 0, msFront = 0, msBack = 0;
+        let seenAbove = false, seenBelow = false, seenLeft = false, seenRight = false;
+        
+        for (let i = 1; i < samples.length; i++) {
+            const b = samples[i];
+            const a = samples[i-1];
+            const dt = Math.max(0, b.ts - a.ts);
+            if (dt <= 0) continue;
+            const dx = (b.x ?? 0) - (targetFish.x ?? 0);
+            const dy = (b.y ?? 0) - (targetFish.y ?? 0);
+            const dist = Math.hypot(dx, dy);
+            if (dist > nearRadius) continue;
+            // Marges pour éviter que les points très proches de l'axe basculent de côté à cause du bruit
+            const fyAbs = targetFish.y ?? 0;
+            const fxAbs = targetFish.x ?? 0;
+            if (b.y <= fyAbs - 2) { msAbove += dt; seenAbove = true; }
+            else if (b.y >= fyAbs + 2) { msBelow += dt; seenBelow = true; }
+            if (b.x <= fxAbs - 2) { msLeft += dt; seenLeft = true; }
+            else if (b.x >= fxAbs + 2) { msRight += dt; seenRight = true; }
+            const dot = dx*fx + dy*fy;
+            if (dot >= 0) msFront += dt; else msBack += dt;
+        }
+        
+        const needed = 1000;
+        let detected = 'unknown';
         let score = 0;
+        let spentMs = 0;
         
-        // 1. Still (immobile au fond) - facile
-        if (avgSpeed < 15 && depthRatio > 0.7) {
-            detectedPattern = 'still';
-            score = 1.0;
-            console.log(`[Pattern] 🎯 Pattern "Still" réalisé (vitesse: ${avgSpeed.toFixed(1)}px/s, profondeur: ${(depthRatio*100).toFixed(1)}%)`);
-        }
-        // 2. Moving (avance rapidement devant le poisson) - facile
-        else if (avgSpeed > 25) {
-            detectedPattern = 'moving';
-            score = Math.min(1.0, avgSpeed / 50);
-            console.log(`[Pattern] 🎯 Pattern "Moving" réalisé (vitesse: ${avgSpeed.toFixed(1)}px/s)`);
-        }
-        // 3. Falling (coule à pic à proximité du poisson) - facile
-        else if (verticalMovement > 20 && avgSpeed > 15) {
-            detectedPattern = 'falling';
-            score = Math.min(1.0, verticalMovement / 50);
-            console.log(`[Pattern] 🎯 Pattern "Falling" réalisé (mouvement vertical: ${verticalMovement.toFixed(1)}px, vitesse: ${avgSpeed.toFixed(1)}px/s)`);
-        }
-        // 4. Hover (reste sur le poisson pendant X secondes) - moyen
-        else if (avgSpeed < 20 && history.length > 30) { // 0.5 seconde d'immobilité
-            detectedPattern = 'hover';
-            score = Math.min(1.0, history.length / 60); // Plus on reste, plus c'est bon
-            console.log(`[Pattern] 🎯 Pattern "Hover" réalisé (vitesse: ${avgSpeed.toFixed(1)}px/s, durée: ${(history.length/60).toFixed(1)}s)`);
-        }
-        // 5. Active (mouvement constant et actif) - moyen
-        else if (avgSpeed > 10 && avgSpeed < 25 && history.length > 20) {
-            detectedPattern = 'active';
-            score = Math.min(1.0, avgSpeed / 20);
-            console.log(`[Pattern] 🎯 Pattern "Active" réalisé (vitesse: ${avgSpeed.toFixed(1)}px/s, durée: ${(history.length/60).toFixed(1)}s)`);
-        }
-        // 6. Deep (mouvement en profondeur) - difficile
-        else if (depthRatio > 0.6 && avgSpeed > 5) {
-            detectedPattern = 'deep';
-            score = Math.min(1.0, depthRatio);
-            console.log(`[Pattern] 🎯 Pattern "Deep" réalisé (profondeur: ${(depthRatio*100).toFixed(1)}%, vitesse: ${avgSpeed.toFixed(1)}px/s)`);
-        }
-        // 7. Bottom (mouvement au fond) - facile
-        else if (depthRatio > 0.8 && avgSpeed < 10) {
-            detectedPattern = 'bottom';
-            score = 1.0;
-            console.log(`[Pattern] 🎯 Pattern "Bottom" réalisé (profondeur: ${(depthRatio*100).toFixed(1)}%, vitesse: ${avgSpeed.toFixed(1)}px/s)`);
-        }
-        // 8. Slow (mouvement lent et régulier) - moyen
-        else if (avgSpeed > 5 && avgSpeed < 15 && history.length > 40) {
-            detectedPattern = 'slow';
-            score = Math.min(1.0, (15 - avgSpeed) / 10);
-            console.log(`[Pattern] 🎯 Pattern "Slow" réalisé (vitesse: ${avgSpeed.toFixed(1)}px/s, durée: ${(history.length/60).toFixed(1)}s)`);
-        }
-        // 9. Rising (mouvement vers la surface) - moyen
-        else if (verticalMovement < -15 && avgSpeed > 8) {
-            detectedPattern = 'rising';
-            score = Math.min(1.0, Math.abs(verticalMovement) / 30);
-            console.log(`[Pattern] 🎯 Pattern "Rising" réalisé (mouvement vertical: ${verticalMovement.toFixed(1)}px, vitesse: ${avgSpeed.toFixed(1)}px/s)`);
-        }
-        // 10. Erratic (mouvement imprévisible) - difficile
-        else if (history.length > 60) {
-            // Calculer la variance du mouvement pour détecter l'erraticité
-            let variance = 0;
-            for (let i = 1; i < history.length; i++) {
-                const speedDiff = Math.abs(history[i].speed - history[i-1].speed);
-                variance += speedDiff;
-            }
-            variance /= history.length;
-            
-            if (variance > 5 && avgSpeed > 8) {
-                detectedPattern = 'erratic';
-                score = Math.min(1.0, variance / 15);
-                console.log(`[Pattern] 🎯 Pattern "Erratic" réalisé (variance: ${variance.toFixed(1)}, vitesse: ${avgSpeed.toFixed(1)}px/s)`);
+        // Priorité aux patterns directionnels maintenus
+        if (msFront >= needed && msFront > msBack + 200) {
+            detected = 'devant';
+            score = Math.min(1, msFront / needed);
+            spentMs = msFront;
+        } else if (msBack >= needed && msBack > msFront + 200) {
+            detected = 'derriere';
+            score = Math.min(1, msBack / needed);
+            spentMs = msBack;
+        } else if (msAbove >= needed && msAbove > msBelow + 200) {
+            detected = 'au_dessus';
+            score = Math.min(1, msAbove / needed);
+            spentMs = msAbove;
+        } else if (msBelow >= needed && msBelow > msAbove + 200) {
+            detected = 'au_dessous';
+            score = Math.min(1, msBelow / needed);
+            spentMs = msBelow;
+        } /*
+        else if (seenAbove && seenBelow && seenLeft && seenRight) {
+            // COMPLETE (désactivé temporairement pour diagnostic)
+            const minPerQuadrant = 250; // ms
+            if (msAbove >= minPerQuadrant && msBelow >= minPerQuadrant && msLeft >= minPerQuadrant && msRight >= minPerQuadrant) {
+                detected = 'complete';
+                const coverMs = (msAbove + msBelow + msLeft + msRight) / 4;
+                score = Math.min(1, coverMs / needed);
             }
         }
+        */
         
-        // Compteurs de patterns (cookies)
-        try {
-            if (!gameState.progress.stats) gameState.progress.stats = {};
-            if (detectedPattern === 'still') {
-                gameState.progress.stats.stillDetections = (gameState.progress.stats.stillDetections || 0) + 1;
-            } else if (detectedPattern === 'hover') {
-                gameState.progress.stats.hoverDetections = (gameState.progress.stats.hoverDetections || 0) + 1;
-            } else if (detectedPattern === 'moving') {
-                gameState.progress.stats.movingDetections = (gameState.progress.stats.movingDetections || 0) + 1;
-            } else if (detectedPattern === 'falling') {
-                gameState.progress.stats.fallingDetections = (gameState.progress.stats.fallingDetections || 0) + 1;
-            } else if (detectedPattern === 'active') {
-                gameState.progress.stats.activeDetections = (gameState.progress.stats.activeDetections || 0) + 1;
-            } else if (detectedPattern === 'deep') {
-                gameState.progress.stats.deepDetections = (gameState.progress.stats.deepDetections || 0) + 1;
-            } else if (detectedPattern === 'bottom') {
-                gameState.progress.stats.bottomDetections = (gameState.progress.stats.bottomDetections || 0) + 1;
-            } else if (detectedPattern === 'slow') {
-                gameState.progress.stats.slowDetections = (gameState.progress.stats.slowDetections || 0) + 1;
-            } else if (detectedPattern === 'rising') {
-                gameState.progress.stats.risingDetections = (gameState.progress.stats.risingDetections || 0) + 1;
-            } else if (detectedPattern === 'erratic') {
-                gameState.progress.stats.erraticDetections = (gameState.progress.stats.erraticDetections || 0) + 1;
-            }
-            saveProgress();
+        // Log + effet visuel quand un pattern est détecté (même sans morsure), avec un petit throttle
+        if (detected !== 'unknown') {
+            try {
+                const now = performance.now();
+                const fishLabel = (targetFish && (targetFish.emoji || targetFish.name)) ? (targetFish.emoji || targetFish.name) : 'poisson';
+                if (gameState._lastPatternLogType !== detected || !gameState._lastPatternLogTs || (now - gameState._lastPatternLogTs) > 500) {
+                    console.log(`[Pattern/curseur] détecté: ${detected} près de ${fishLabel}`);
+                    gameState._lastPatternLogType = detected;
+                    gameState._lastPatternLogTs = now;
+                }
+                // Effet ✨ sur le poisson ciblé quand la validation vient d'aboutir
+                if (targetFish) {
+                    const lastFx = targetFish._lastPatternEffectTs || 0;
+                    if (spentMs >= needed && (now - lastFx) > 900) {
+                        spawnPatternSparkle(targetFish.x, targetFish.y, `valid:${detected}`);
+                        targetFish._lastPatternEffectTs = now;
+                        // Accorder une fenêtre de 5s pendant laquelle la morsure sera garantie
+                        try {
+                            targetFish._patternBoostUntil = Date.now() + 5000;
+                            targetFish._patternBoostType = detected;
+                            console.log(`[Pattern/boost] ${detected} actif sur ${(targetFish.emoji||targetFish.name||'poisson')} pendant 5s`);
+                        } catch (e) {}
+                    }
+                }
         } catch (e) {}
-        
-        return { type: detectedPattern, score: score };
+        }
+        gameState._lastPatternType = detected;
+        return { type: detected, score };
     }
 
     function checkHookCollisions() {
         if (!gameState.isCasting) return;
         if (gameState.attachedFish.length > 0) return; // un seul poisson à la fois
         
-        const baitPattern = analyzeBaitPattern();
+        const baitPattern = { type: 'unknown', score: 0 }; // placeholder avant la boucle
         const hookR = GAME_CONFIG.hook.size * 1.2;
         
         for (let i=0;i<gameState.fish.length;i++){
@@ -2439,6 +2925,8 @@
             const distance = Math.sqrt(dx*dx + dy*dy);
             const hitRadius = fish.size * 0.9 + hookR;
             if (distance < hitRadius) {
+                // Analyser le pattern par rapport à CE poisson précis
+                const baitPattern = analyzeBaitPattern(fish);
                 // Le poisson décide s'il mord ou refuse
                 const now = Date.now();
                 const underRefusal = fish.refusedUntil && now < fish.refusedUntil;
@@ -2446,33 +2934,25 @@
                 // Appliquer les perks des chapeaux
                 const perks = applyHatPerks();
                 
-                // Calculer le bonus de pattern (0.5 à 2.0×)
-                let patternBonus = 1.0;
+                // Nouvelle règle: si le pattern correspond à l'espèce, la morsure est GARANTIE
+                // Les espèces peuvent définir baitPattern parmi: 'devant','derriere','au_dessus','au_dessous','complete','any'
+                let biteProb = underRefusal ? 0 : (fish.biteAffinity || 0.5);
+                let patternGuaranteed = false;
                 if (fish.baitPattern === 'any') {
-                    patternBonus = 1.2; // Toujours intéressé
-                } else if (baitPattern.type === fish.baitPattern) {
-                    patternBonus = 1.0 + (baitPattern.score * 1.0); // Jusqu'à 2.0× si pattern parfait
-                    
-                    // Bonus de pattern spécifiques aux chapeaux
-                    if (baitPattern.type === 'hover' && perks.hoverPatternBonus) {
-                        patternBonus *= perks.hoverPatternBonus;
-                    }
-                    if (baitPattern.type === 'still' && perks.stillPatternBonus) {
-                        patternBonus *= perks.stillPatternBonus;
-                    }
-                    if (baitPattern.type === 'moving' && perks.movingPatternBonus) {
-                        patternBonus *= perks.movingPatternBonus;
-                    }
-                    if (baitPattern.type === 'falling' && perks.fallingPatternBonus) {
-                        patternBonus *= perks.fallingPatternBonus;
-                    }
+                    // Léger bonus générique
+                    biteProb *= 1.2;
+                } else if (
+                    (baitPattern.type && fish.baitPattern && baitPattern.type === fish.baitPattern) ||
+                    (fish._patternBoostUntil && Date.now() < fish._patternBoostUntil && (!fish.baitPattern || fish._patternBoostType === fish.baitPattern))
+                ) {
+                    // Pattern réussi ou boost actif → morsure garantie
+                    biteProb = 1.0;
+                    patternGuaranteed = true;
                 } else if (baitPattern.type === 'unknown') {
-                    patternBonus = 0.8; // Pas de pattern clair
+                    biteProb *= 0.8;
                 } else {
-                    patternBonus = 0.4; // Mauvais pattern
+                    biteProb *= 0.6;
                 }
-                
-                let biteProb = underRefusal ? 0 : (fish.biteAffinity || 0.5) * patternBonus;
                 
                 // Appliquer le bonus de chance de morsure
                 if (perks.biteChance) {
@@ -2497,9 +2977,17 @@
                     biteProb *= perks.autumnEfficiency;
                 }
                 
+                // Si pattern garanti, ignorer les autres modificateurs
+                if (patternGuaranteed) biteProb = 1.0;
                 biteProb = Math.min(1.0, biteProb); // Cap à 100%
                 
                 if (Math.random() < biteProb) {
+                    // Effet ✨ si morsure déclenchée par un pattern correspondant
+                    try {
+                        if (baitPattern.type && fish.baitPattern && baitPattern.type === fish.baitPattern) {
+                            spawnPatternSparkle(fish.x, fish.y, `${baitPattern.type} → ${fish.name || fish.emoji}`);
+                        }
+                    } catch (e) {}
                     // Entrer en état de morsure en attente (durée basée sur flashDuration)
                     const flashDur = fish.flashDuration || 2000;
                     
@@ -2560,6 +3048,44 @@
                 // Effet visuel temporaire
             }, i * 50);
         }
+    }
+
+    // Effet visuel discret lors d'une morsure déclenchée par pattern
+    function spawnPatternSparkle(x, y, info) {
+        // Une étincelle ✨ qui grossit et disparaît rapidement
+        gameState.effects.push({
+            type: 'sparkle',
+            x, y,
+            age: 0,
+            life: 0.9, // durée plus longue (s)
+            size: 14 + Math.random() * 6,
+            rotation: Math.random() * Math.PI * 2
+        });
+        try { console.log(`[Pattern✨] Effet déclenché ${info ? '('+info+') ' : ''}à x=${Math.round(x)}, y=${Math.round(y)}`); } catch (e) {}
+    }
+
+    function updateEffects(deltaSec) {
+        if (!gameState.effects) return;
+        gameState.effects.forEach(e => { e.age += deltaSec; });
+        gameState.effects = gameState.effects.filter(e => e.age < e.life);
+    }
+
+    function drawEffects(ctx) {
+        if (!gameState.effects) return;
+        gameState.effects.forEach(e => {
+            const t = Math.min(1, e.age / e.life);
+            const alpha = 1 - t * 0.9; // fade plus lent
+            const scale = 0.9 + 0.5 * t; // un peu plus d'ampleur
+            ctx.save();
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.translate(e.x, e.y);
+            ctx.rotate(e.rotation);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `${(e.size * scale).toFixed(0)}px sans-serif`;
+            ctx.fillText('✨', 0, 0);
+            ctx.restore();
+        });
     }
 
 
@@ -2660,13 +3186,9 @@
                 weightElement.textContent = `${Math.round(weight)}g`;
             }
             
-            if (!gameState.timerEnabled) {
-                weightElement.style.opacity = '0.5';
-                weightElement.style.textDecoration = 'line-through';
-            } else {
+            // En mode sans chrono, le poids compte aussi: pas d'effet barré/atténué
                 weightElement.style.opacity = '1';
                 weightElement.style.textDecoration = 'none';
-            }
         }
         
     }
@@ -2824,15 +3346,28 @@
         }
         gameState._wasUnderWater = isUnderWater;
         const drag = isUnderWater ? GAME_CONFIG.physics.waterDrag : GAME_CONFIG.physics.airDrag;
-        // Gravité
-        gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * deltaSec * (isUnderWater ? 0.35 : 1);
+        // Gravité (le poids de l'hameçon ne s'applique que sous l'eau)
+        const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+        if (isUnderWater) {
+            // Effet plus fort du poids: gravité accrue proportionnelle au carré du facteur
+            const weightForce = hookWeight * hookWeight; // quadratique
+            gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * weightForce * deltaSec * 0.50; // 0.35 -> 0.50
+            // Flottabilité uniforme (même comportement vide/avec poisson), atténuée par le poids
+            const buoyMul = 1 / (0.7 + 0.3 * hookWeight); // 1x à 0.5x
+            gameState.hookVelocity.y -= (GAME_CONFIG.physics.attachedBuoyancy || 0) * buoyMul * deltaSec;
+        } else {
+            gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * deltaSec;
+        }
         // Ralentir spécifiquement le mouvement vertical sous l'eau
         if (isUnderWater) {
             // amortissement multiplicatif supplémentaire sur l'axe vertical
-            const damp = GAME_CONFIG.physics.waterVerticalDamp || 1;
+            const baseDamp = GAME_CONFIG.physics.waterVerticalDamp || 1;
+            // Hameçon plus lourd => moins d'amortissement vertical
+            const damp = 1 - (1 - baseDamp) / Math.max(1, hookWeight);
             gameState.hookVelocity.y *= (1 - Math.min(0.95, Math.max(0, (1 - damp)) ) * Math.min(1, deltaSec * 5));
-            // limiter la vitesse verticale max sous l'eau
-            const vmaxY = GAME_CONFIG.physics.maxWaterVerticalSpeed || 200;
+            // limiter la vitesse verticale max sous l'eau (plus lourds => plafond plus élevé)
+            const baseVmaxY = GAME_CONFIG.physics.maxWaterVerticalSpeed || 200;
+            const vmaxY = baseVmaxY * (0.9 + 0.6 * Math.max(1, hookWeight));
             if (gameState.hookVelocity.y > vmaxY) gameState.hookVelocity.y = vmaxY;
             if (gameState.hookVelocity.y < -vmaxY) gameState.hookVelocity.y = -vmaxY;
         }
@@ -2847,10 +3382,7 @@
             // Déterminer si le poisson tire (force active) en fonction de sa stamina et d'un rythme basique
             const pullActive = fish.stamina > 1 && (Math.sin(gameState.struggleTime * (1 + fish.speed*0.3)) > 0.2 || (gameState.lineTension > 0.3));
 
-            // Flottabilité sous l'eau pour limiter la descente
-            if (isUnderWater) {
-                gameState.hookVelocity.y -= (GAME_CONFIG.physics.attachedBuoyancy || 0) * deltaSec;
-            }
+            // (flottabilité déjà appliquée uniformément plus haut)
 
             // Cas 1: poisson tire et rembobinage NON cliqué
             if (pullActive && !gameState.isReeling) {
@@ -2911,8 +3443,18 @@
             gameState.struggleTime = 0;
         }
         // Traînée simple (amortissement)
-        gameState.hookVelocity.x *= (1 - drag * deltaSec);
-        gameState.hookVelocity.y *= (1 - drag * deltaSec);
+        // Sous l'eau: un hameçon plus lourd subit légèrement moins la traînée
+        // Hors de l'eau: traînée inchangée par le poids
+        if (isUnderWater) {
+            // Réduction supplémentaire de la traînée quand l'hameçon est lourd
+            const dragMul = 1 - (drag * deltaSec) / (0.5 + 0.5 * hookWeight); // plus sensible au poids
+            gameState.hookVelocity.x *= dragMul;
+            gameState.hookVelocity.y *= dragMul;
+        } else {
+            const dragMul = 1 - drag * deltaSec;
+            gameState.hookVelocity.x *= dragMul;
+            gameState.hookVelocity.y *= dragMul;
+        }
         // Déplacement
         gameState.hookPosition.x += gameState.hookVelocity.x * deltaSec;
         gameState.hookPosition.y += gameState.hookVelocity.y * deltaSec;
@@ -3054,7 +3596,33 @@
                 tension = Math.max(targetTension, (gameState.lineTension || 0) - maxDelta);
             }
         } else {
-            tension = dist > maxLen * 0.98 ? 0.5 : 0.08;
+            // Ligne vide: logique alignée, mais l'effet du poids sur la tension est fortement réduit
+            const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+            const sizeMultiplier = 0.45; // quasi constant pour minimiser l'impact du poids
+            const reelForce = (gameState.isReeling ? GAME_CONFIG.physics.reelSpeed * (0.25 + 0.75 * gameState.reelIntensity) : 0.0001);
+            let targetTension = 0.10;
+            // Composante de rembobinage similaire à la branche avec poisson
+            const intensity = gameState.reelIntensity || 0;
+            const reelComponent = gameState.isReeling ? reelForce * (0.006 + 0.005 * intensity) * sizeMultiplier : 0;
+            if (gameState.isReeling) {
+                targetTension += reelComponent;
+                targetTension = Math.max(targetTension, (0.15 + 0.25 * intensity) * sizeMultiplier);
+            } else {
+                // Influence du poids quasi nulle sur la tension
+                if (isUnderWater) targetTension += 0.01 * (hookWeight - 1) * sizeMultiplier;
+                targetTension = Math.max(0.05, targetTension - 0.12);
+            }
+            // Bonus si proche de la longueur max
+            if (dist > maxLen * 0.95) targetTension += 0.12;
+            // Clamp 0..1
+            targetTension = Math.max(0, Math.min(1, targetTension));
+            // Lissage identique: montée lente, descente rapide
+            const maxDelta = (targetTension > (gameState.lineTension || 0)) ? 0.7 * deltaSec : 1.8 * deltaSec;
+            if (targetTension > (gameState.lineTension || 0)) {
+                tension = Math.min(targetTension, (gameState.lineTension || 0) + maxDelta);
+            } else {
+                tension = Math.max(targetTension, (gameState.lineTension || 0) - maxDelta);
+            }
         }
         gameState.lineTension = Math.max(0, Math.min(1, tension));
 
@@ -3270,8 +3838,7 @@
                 if (gameState.timerEnabled) {
                 gameState.progress.stats.cumulativeScore = (gameState.progress.stats.cumulativeScore || 0) + gained;
                 }
-                // Poids cumulé (somme des poids de chaque poisson capturé) seulement si timer activé
-                if (gameState.timerEnabled) {
+                // Poids cumulé (somme des poids de chaque poisson capturé) — COMPTE TOUJOURS, même sans chrono
                 let capturedWeight = 0;
                 gameState.attachedFish.forEach(att => {
                     let w = Math.max(0.1, (att.fish.size / 10));
@@ -3291,9 +3858,10 @@
                     // Ajouter au poids total pour le déblocage de taille (en grammes)
                     gameState.totalWeight += capturedWeight * 1000; // Convertir kg en grammes
                     
-                    // Mettre à jour la taille de la fenêtre si nécessaire
+                // Mettre à jour les limites max selon le poids (sans forcer la taille)
                     updateWindowSizeBasedOnWeight();
-                }
+                // Vérifier les déblocages immédiatement après mise à jour du poids
+                checkUnlocks();
                 // Streak sans casse seulement si timer activé
                 if (gameState.timerEnabled) {
                 gameState.progress.stats.currentNoBreakStreak = (gameState.progress.stats.currentNoBreakStreak || 0) + fishCount;
@@ -3451,11 +4019,14 @@
         drawBackground(ctx, canvas);
         drawBubbles(ctx, canvas);
         drawFish(ctx);
+        drawFloatingHats(ctx, canvas);
         drawFishingRod(ctx, canvas);
         drawCastPreview(ctx);
         drawMouseIndicator(ctx);
         drawCustomCursor(ctx);
         drawDepthIndicator(ctx, canvas);
+        // Dessiner les effets en dernier (par-dessus tout)
+        drawEffects(ctx);
     }
     
     // Dessiner l'indicateur circulaire sous la souris
@@ -3842,7 +4413,7 @@
             });
         }
         
-        // Dessiner seulement les zones qui correspondent à la profondeur d'eau
+        // Dessiner uniquement les zones qui correspondent à la profondeur d'eau
         let currentY = indicatorTop;
         zonesToDisplay.forEach((zone, index) => {
             ctx.fillStyle = zone.color;
@@ -3985,12 +4556,42 @@
         // Mettre à jour l'angle de la canne avant la preview pour que l'arc suive
         updateRodAngle(deltaSec);
         updateCastPreview();
+        // Enregistrer les mouvements du curseur pour la détection de pattern
+        if (!gameState.cursorMovementHistory) gameState.cursorMovementHistory = [];
+        const lastCursor = gameState._lastCursor || { x: gameState.mouseX || 0, y: gameState.mouseY || 0 };
+        const curX = (gameState.mouseX || 0);
+        const curY = (gameState.mouseY || 0);
+        const dxC = curX - lastCursor.x;
+        const dyC = curY - lastCursor.y;
+        const speedC = Math.hypot(dxC, dyC) / Math.max(0.016, deltaSec);
+        gameState.cursorMovementHistory.push({ x: curX, y: curY, dx: dxC, dy: dyC, speed: speedC, ts: performance.now() });
+        if (gameState.cursorMovementHistory.length > 120) gameState.cursorMovementHistory.shift();
+        gameState._lastCursor = { x: curX, y: curY };
         if (canvasEl) {
             spawnFishTimed(deltaSec, canvasEl);
             updateHookPhysics(deltaSec, canvasEl);
             updateFish(canvasEl);
+            updateFloatingHats(deltaSec, canvasEl);
+            updateEffects(deltaSec);
+            // Respawn passif des chapeaux débloqués mais non attrapés
+            gameState._hatSpawnAccumulator += deltaSec;
+            if (gameState._hatSpawnAccumulator >= 10) { // toutes les ~10s
+                gameState._hatSpawnAccumulator = 0;
+                try {
+                    const hatsCatalog = gameState.hatItems || [];
+                    const unlocked = (gameState.progress?.hats?.unlocked) || [];
+                    const owned = (gameState.progress?.hats?.owned) || [];
+                    const candidates = hatsCatalog.filter(h => unlocked.includes(h.emoji) && !owned.includes(h.emoji));
+                    if (candidates.length) {
+                        const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+                        const already = gameState.floatingHats.some(fh => fh.emoji === candidate.emoji);
+                        if (!already) spawnFloatingHat(candidate.emoji);
+                    }
+                } catch (e) {}
+            }
         }
         checkHookCollisions();
+        checkHatCollision();
         reelUpdate(deltaSec);
         // Dessin principal
         const canvasNode = document.getElementById('fishing-canvas');
@@ -4062,8 +4663,9 @@
 
     // Fonction pour terminer le jeu
     function endGame() {
-        gameState.isPlaying = false;
-        if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+        // Laisser l'animation et l'écran du jeu continuer de bouger
+        // Désactiver simplement le chrono pour éviter de relancer endGame
+        gameState.timerEnabled = false;
         if (gameState.score > gameState.highScore) {
             gameState.highScore = gameState.score;
             localStorage.setItem('fishingHighScore', String(gameState.highScore));
@@ -4386,6 +4988,20 @@
                 gameState.mouseY = e.clientY - rect.top;
                 gameState.isMouseDown = true;
                 
+                // Vérifier si on clique sur l'indicateur de chapeaux
+                if (gameState.hatIndicatorPos) {
+                    const clickX = gameState.mouseX;
+                    const clickY = gameState.mouseY;
+                    const indicator = gameState.hatIndicatorPos;
+                    
+                    if (clickX >= indicator.x && clickX <= indicator.x + indicator.width &&
+                        clickY >= indicator.y && clickY <= indicator.y + indicator.height) {
+                        // Ouvrir le menu de sélection de chapeaux
+                        showHatSelectionMenu();
+                        return;
+                    }
+                }
+                
                 // Le jeu démarre automatiquement maintenant, pas besoin d'attendre le premier clic
                 if (!gameState.isCasting) {
                     // Mode lancer: charger la puissance + preview
@@ -4657,7 +5273,10 @@
         const closeBtn = document.getElementById('fishing-game-over-close');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
+                // Relancer une partie sans chrono et fermer la modale
                 gameOverWindow.remove();
+                gameState.timerEnabled = false;
+                startGame();
             });
         }
         
@@ -4674,8 +5293,10 @@
         const closeGameBtn = document.getElementById('fishing-close-game-btn');
         if (closeGameBtn) {
             closeGameBtn.addEventListener('click', () => {
+                // Relancer une partie sans chrono et fermer la modale
                 gameOverWindow.remove();
-                closeGame();
+                gameState.timerEnabled = false;
+                startGame();
             });
         }
         
@@ -4917,6 +5538,9 @@
                 <button id="format-json" style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.2s;">
                     🎨 Formater JSON
                 </button>
+                <button id="toggle-quadrants" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.2s;">
+                    🧭 Quadrants Patterns
+                </button>
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -4937,6 +5561,7 @@
         const resetWindowBtn = document.getElementById('reset-window');
         const exportBtn = document.getElementById('export-cookies');
         const importBtn = document.getElementById('import-cookies');
+        const toggleQuadrantsBtn = document.getElementById('toggle-quadrants');
         const importFile = document.getElementById('import-file');
         const closeBtn = document.getElementById('close-cookie-manager');
         const statusDiv = document.getElementById('cookie-status');
@@ -5034,8 +5659,9 @@
                     <h4 style="color: #a7f3d0; margin-bottom: 10px;">Chapeau équipé</h4>
                     <select id="equipped-hat" style="background: rgba(0,0,0,0.3); color: white; border: 1px solid #374151; border-radius: 5px; padding: 5px; width: 100%;">
                         <option value="">Aucun</option>
-                        ${hats.unlocked.map(emoji => `<option value="${emoji}" ${hats.equipped === emoji ? 'selected' : ''}>${emoji}</option>`).join('')}
+                        ${hats.owned.map(emoji => `<option value="${emoji}" ${hats.equipped === emoji ? 'selected' : ''}>${emoji}</option>`).join('')}
                     </select>
+                    <div style="font-size: 12px; color:#9ca3af; margin-top:6px;">Astuce: un chapeau débloqué doit d'abord être <strong>attrapé</strong> à la surface pour être équipable.</div>
                 </div>
             `;
         }
@@ -5445,6 +6071,14 @@
             importFile.click();
         });
 
+        // Activer l'affichage des quadrants de détection autour des poissons
+        if (toggleQuadrantsBtn) {
+            toggleQuadrantsBtn.addEventListener('click', () => {
+                gameState.debugQuadrants = !gameState.debugQuadrants;
+                showToast(gameState.debugQuadrants ? 'Quadrants affichés' : 'Quadrants masqués', 'info');
+            });
+        }
+
         importFile.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
@@ -5572,6 +6206,11 @@
                 unlocked: [],  // emojis de chapeaux débloqués
                 owned: [],     // emojis possédés (attrapés)
                 equipped: null // emoji équipé
+            },
+            // Fonctionnalités débloquables et réglages persistés
+            features: {
+                hookWeightUnlocked: false,
+                hookWeightFactor: 1
             }
         };
         const saved = getCookie('fishingProgress');
@@ -5807,6 +6446,9 @@
                 <button id="tab-species" class="guide-tab active" style="flex: 1; padding: 15px; background: #8b4513; color: white; border: none; font-size: 16px; cursor: pointer; font-family: inherit;">
                     🐟 Espèces
                 </button>
+                <button id="tab-patterns" class="guide-tab" style="flex: 1; padding: 15px; background: #d6c7b3; color: #8b4513; border: none; font-size: 16px; cursor: pointer; font-family: inherit;">
+                    🧩 Patterns
+                </button>
                 <button id="tab-hats" class="guide-tab" style="flex: 1; padding: 15px; background: #d6c7b3; color: #8b4513; border: none; font-size: 16px; cursor: pointer; font-family: inherit;">
                     🎩 Chapeaux
                 </button>
@@ -5830,6 +6472,19 @@
                         <h3 style="color: #8b4513; margin-bottom: 15px;">📋 Détails</h3>
                         <div id="species-details" style="text-align: center; opacity: 1; margin-top: 80px; font-style: italic;">
                             Sélectionne une espèce pour voir ses détails
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Onglet Patterns -->
+                <div id="content-patterns" class="guide-content" style="display: none; height: 100%;">
+                    <div style="flex: 1; padding: 20px; overflow-y: auto;">
+                        <h3 style="color: #8b4513; margin-bottom: 15px;">🧩 Patterns d'Appât (détection au curseur)</h3>
+                        <div id="patterns-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                            <!-- Liste des patterns -->
+                        </div>
+                        <div style="margin-top: 12px; font-size: 13px; color: #555;">
+                            Règle générale: réaliser le pattern dans un rayon de <strong>20px</strong> autour du poisson pendant <strong>3s</strong>. Si le pattern correspond au préféré de l'espèce ⇒ probabilité de morsure ≥ <strong>90%</strong>.
                         </div>
                     </div>
                 </div>
@@ -6006,11 +6661,33 @@
             // Générer le contenu de l'onglet
             if (tabName === 'species') {
                 generateSpeciesList();
+            } else if (tabName === 'patterns') {
+                generatePatternsList();
             } else if (tabName === 'hats') {
                 generateHatsList();
             } else if (tabName === 'achievements') {
                 generateAchievementsList();
             }
+        }
+
+        // Fonction pour générer la liste des patterns
+        function generatePatternsList() {
+            const container = document.getElementById('patterns-list');
+            if (!container) return;
+            const patterns = [
+                { key:'devant',    title:'Devant',    desc:"Rester devant la direction du poisson dans un rayon de 20px pendant 3s." },
+                { key:'derriere',  title:'Derrière',  desc:"Rester derrière le poisson dans un rayon de 20px pendant 3s." },
+                { key:'au_dessus', title:'Au‑dessus', desc:"Maintenir la souris au‑dessus du poisson (y plus petit) dans un rayon de 20px pendant 3s." },
+                { key:'au_dessous',title:'Au‑dessous',desc:"Maintenir la souris au‑dessous du poisson (y plus grand) dans un rayon de 20px pendant 3s." },
+                { key:'toucher',   title:'Toucher',   desc:"Garder le curseur directement sur le poisson (≤ 8px) pendant 3s." },
+                { key:'complete',  title:'Complete',  desc:"Avoir été au‑dessus, au‑dessous, à gauche et à droite du poisson en 3s." }
+            ];
+            container.innerHTML = patterns.map(p => `
+                <div style="background: rgba(139,69,19,0.08); border: 2px solid #8b4513; border-radius: 8px; padding: 12px;">
+                    <div style="font-weight: 700; color:#8b4513; margin-bottom: 6px;">${p.title}</div>
+                    <div style="font-size: 13px; color:#555; line-height:1.5;">${p.desc}</div>
+                </div>
+            `).join('');
         }
 
         // Fonction pour mettre à jour les listes en temps réel
@@ -6019,6 +6696,10 @@
             const speciesContent = document.getElementById('content-species');
             if (speciesContent && speciesContent.style.display !== 'none') {
                 generateSpeciesList();
+            }
+            const patternsContent = document.getElementById('content-patterns');
+            if (patternsContent && patternsContent.style.display !== 'none') {
+                generatePatternsList();
             }
             
             // Mettre à jour la liste des chapeaux si elle est visible
@@ -6224,7 +6905,7 @@
                     </div>
                     ${isUnlocked ? `
                         <div style="font-size: 11px; color: #666; line-height: 1.3;">
-                            ${hat.unlock}
+                            ${describeHatUnlock(hat.unlock, hat.unlockText)}
                         </div>
                     ` : `
                         <div style="font-size: 11px; color: #666; margin-bottom: 6px; line-height: 1.2;">
@@ -6403,6 +7084,103 @@
             });
         }
 
+        // Génère une description lisible des perks d'un chapeau
+        function describeHatPerks(perks) {
+            if (!perks || typeof perks !== 'object') return 'Aucun effet spécial';
+            const parts = [];
+            const toPct = (v) => `${Math.round((v - 1) * 100)}%`;
+            const toPctRaw = (v) => `${Math.round(v * 100)}%`;
+            Object.entries(perks).forEach(([key, val]) => {
+                switch (key) {
+                    case 'pointsMultiplier':
+                        parts.push(`+${toPct(val)} points`); break;
+                    case 'weightMultiplier':
+                        parts.push(`+${toPct(val)} poids des poissons`); break;
+                    case 'biteChanceMultiplier':
+                        parts.push(`+${toPct(val)} chance de morsure`); break;
+                    case 'castAccuracyBonus':
+                        parts.push(`+${toPctRaw(val)} précision de lancer`); break;
+                    case 'reelSpeedMultiplier':
+                        parts.push(`+${toPct(val)} vitesse de rembobinage`); break;
+                    case 'surfaceReelSpeedMultiplier':
+                        parts.push(`+${toPct(val)} rembobinage en surface`); break;
+                    case 'deepTensionResistance':
+                        parts.push(`+${toPct(val)} résistance à la tension en profondeur`); break;
+                    case 'fishAggressionMultiplier':
+                        parts.push(`+${toPct(val)} agressivité des poissons`); break;
+                    case 'dawnEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité à l'aube`); break;
+                    case 'summerEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité en été`); break;
+                    case 'autumnEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité en automne`); break;
+                    case 'treasureChance':
+                        parts.push(`×${val} chance de trésors`); break;
+                    case 'rainbowColors':
+                        parts.push(`Effet arc‑en‑ciel cosmétique`); break;
+                    case 'transformChanceMultiplier':
+                        parts.push(`+${toPct(val)} chance d'effet de transformation`); break;
+                    case 'mythicSpawnRate':
+                        parts.push(`×${val} spawn des espèces mythiques`); break;
+                    case 'nightEfficiency':
+                        parts.push(`+${toPct(val)} efficacité la nuit`); break;
+                    case 'dayEfficiency':
+                        parts.push(`+${toPct(val)} efficacité de jour`); break;
+                    case 'dawnEfficiency':
+                        parts.push(`+${toPct(val)} efficacité à l'aube`); break;
+                    case 'summerEfficiency':
+                        parts.push(`+${toPct(val)} efficacité en été`); break;
+                    default:
+                        // fallback générique clé: valeur
+                        parts.push(`${key}: ${typeof val === 'number' ? val : 'actif'}`);
+                }
+            });
+            return parts.length ? `• ${parts.join('<br>• ')}` : 'Aucun effet spécial';
+        }
+
+        // Génère une description lisible de la condition de déblocage d'un chapeau
+        function describeHatUnlock(unlock, fallbackText) {
+            if (fallbackText) return fallbackText;
+            if (!unlock || typeof unlock !== 'object') return 'Condition inconnue';
+            const t = unlock.type;
+            switch (t) {
+                case 'always':
+                    return 'Toujours disponible';
+                case 'cumulative_score_at_least':
+                    return `Atteindre ${unlock.value} points cumulés`;
+                case 'casts_at_least':
+                    return `Effectuer ${unlock.value} lancers`;
+                case 'surface_seconds_at_least':
+                    return `Rester ${unlock.value}s en surface (cumulé)`;
+                case 'catches_at_least':
+                    return `Capturer ${unlock.value} poissons`;
+                case 'deep_visits_at_least':
+                    return `Visiter le fond ${unlock.value} fois`;
+                case 'cumulative_weight_kg_at_least':
+                    return `Atteindre ${unlock.value} kg cumulés`;
+                case 'line_breaks_at_least':
+                    return `Casser ${unlock.value} lignes`;
+                case 'catches_species_at_least':
+                    return `Capturer ${unlock.value} × ${unlock.emoji || 'espèce cible'}`;
+                case 'catches_at_time_of_day':
+                    return `Capturer ${unlock.value} poissons au moment « ${unlock.period} »`;
+                case 'catches_in_season_at_least':
+                    return `Capturer ${unlock.value} poissons en ${unlock.season}`;
+                case 'all_species_caught':
+                    return 'Capturer 1 de chaque espèce';
+                case 'treasures_at_least':
+                    return `Capturer ${unlock.value} trésors`;
+                case 'play_seconds_at_least':
+                    return `Jouer ${unlock.value}s`;
+                case 'perfect_games_at_least':
+                    return `Réaliser ${unlock.value} scores parfaits`;
+                case 'transformed_catches_at_least':
+                    return `Capturer ${unlock.value} poissons transformés`;
+                default:
+                    try { return JSON.stringify(unlock); } catch { return 'Condition inconnue'; }
+            }
+        }
+
         // Fonction pour afficher les détails d'un chapeau
         function showHatDetails(emoji) {
             const detailsDiv = document.getElementById('hats-details');
@@ -6440,12 +7218,12 @@
                 
                 <div style="background: rgba(139,69,19,0.08); padding: 12px; border-radius: 6px; border-left: 4px solid #8b4513; margin-bottom: 16px;">
                     <div style="font-weight: 700; margin-bottom: 4px; color: #8b4513;">Condition de déblocage:</div>
-                    <div style="font-size: 14px; line-height: 1.4;">${isUnlocked ? hat.unlock : 'Informations verrouillées'}</div>
+                    <div style="font-size: 14px; line-height: 1.4;">${describeHatUnlock(hat.unlock, hat.unlockText)}</div>
                 </div>
                 
                 <div style="background: rgba(139,69,19,0.08); padding: 12px; border-radius: 6px; border-left: 4px solid ${rarityColor};">
-                    <div style="font-weight: 700; margin-bottom: 4px; color: #8b4513;">Effet spécial:</div>
-                    <div style="font-size: 14px; line-height: 1.4; color: ${rarityColor};">${isUnlocked ? hat.perk : 'Informations verrouillées - Débloquez ce chapeau pour voir l\'effet spécial'}</div>
+                    <div style="font-weight: 700; margin-bottom: 4px; color: #8b4513;">Effets:</div>
+                    <div style="font-size: 14px; line-height: 1.5; color: ${rarityColor};">${isUnlocked ? describeHatPerks(hat.perks || {}) : 'Informations verrouillées - Débloquez ce chapeau pour voir les effets'}</div>
                 </div>
                 
                 ${!isUnlocked ? `
@@ -6466,15 +7244,16 @@
                 
                 ${isUnlocked ? `
                     <div style="margin-top: 20px; text-align: center;">
-                        <button id="equip-hat" style="background: ${isEquipped ? '#666' : '#8b4513'}; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: ${isEquipped ? 'default' : 'pointer'}; font-family: inherit;">
+                        <button id="equip-hat" style="background: ${isEquipped ? '#666' : (isOwned ? '#8b4513' : '#555')}; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: ${(isEquipped || !isOwned) ? 'default' : 'pointer'}; font-family: inherit;" ${!isOwned ? 'disabled' : ''}>
                             ${isEquipped ? 'ÉQUIPÉ' : 'ÉQUIPER'}
                         </button>
+                        ${!isOwned ? '<div style="margin-top:6px; font-size:12px; color:#9ca3af;">Attrape ce chapeau à la surface pour pouvoir l\'équiper.</div>' : ''}
                     </div>
                 ` : ''}
             `;
             
             // Gestionnaire pour le bouton d'équipement
-            if (isUnlocked && !isEquipped) {
+            if (isUnlocked && isOwned && !isEquipped) {
                 const equipBtn = document.getElementById('equip-hat');
                 if (equipBtn) {
                     equipBtn.addEventListener('click', () => {
@@ -6515,13 +7294,17 @@
                 'mythique': '#ff4500'
             }[fishType.rarity] || '#8b4513';
             
-            // Description du pattern de leurre
-            const patternDescription = {
-                'hover': 'Mouvement de survol - Maintenir la souris au-dessus du poisson',
-                'still': 'Immobilité - Rester parfaitement immobile',
-                'bottom': 'Fond - Positionner l\'hameçon au fond de l\'eau',
-                'moving': 'Mouvement - Bouger la souris de manière constante'
-            }[fishType.baitPattern] || 'Aucun pattern spécial';
+            // Libellés et descriptions des patterns (6 nouveaux + générique)
+            const patternInfoMap = {
+                'devant':    { label: 'Devant',    desc: 'Rester DEVANT le poisson (≤20px) pendant 3s.' },
+                'derriere':  { label: 'Derrière',  desc: 'Rester DERRIÈRE le poisson (≤20px) pendant 3s.' },
+                'au_dessus': { label: 'Au‑dessus', desc: 'Maintenir la souris AU‑DESSUS du poisson (≤20px) pendant 3s.' },
+                'au_dessous':{ label: 'Au‑dessous',desc: 'Maintenir la souris AU‑DESSOUS du poisson (≤20px) pendant 3s.' },
+                'toucher':   { label: 'Toucher',   desc: 'Garder le curseur SUR le poisson (≤8px) pendant 3s.' },
+                'complete':  { label: 'Complete',  desc: 'Couvrir HAUT/BAS/GAUCHE/DROITE autour du poisson en 3s (≤20px).' },
+                'any':       { label: 'Any',       desc: 'Aucun pattern spécial requis (léger bonus quelles que soient les positions).' }
+            };
+            const patternData = patternInfoMap[fishType.baitPattern] || { label: 'Aucun', desc: 'Aucun pattern spécial.' };
             
             detailsDiv.innerHTML = `
                 <div style="text-align: center; margin-bottom: 20px;">
@@ -6561,7 +7344,7 @@
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; line-height: 1.6;">
                         <div><strong>Agressivité:</strong> ${isUnlocked ? `${Math.round(fishType.aggressionRange[0] * 100)}-${Math.round(fishType.aggressionRange[1] * 100)}%` : '???'}</div>
                         <div><strong>Durée flash:</strong> ${isUnlocked ? `${fishType.flashDuration[0]}-${fishType.flashDuration[1]}s` : '???'}</div>
-                        <div><strong>Pattern préféré:</strong> <span style="color: #b8860b; font-weight: bold;">${isUnlocked ? (fishType.baitPattern || 'Aucun') : '???'}</span></div>
+                        <div><strong>Pattern préféré:</strong> <span style="color: #b8860b; font-weight: bold;">${isUnlocked ? patternData.label : '???'}</span></div>
                         <div><strong>Difficulté:</strong> ${isUnlocked ? (fishType.staminaRange[1] > 150 ? 'Difficile' : fishType.staminaRange[1] > 100 ? 'Moyen' : 'Facile') : '???'}</div>
                     </div>
                 </div>
@@ -6570,7 +7353,7 @@
                 <div style="background: rgba(139,69,19,0.08); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                     <h3 style="margin: 0 0 12px 0; color: #8b4513; font-size: 16px;">🎯 Technique de Capture</h3>
                     <div style="font-size: 14px; line-height: 1.5; color: #666;">
-                        <strong>Pattern de leurre:</strong> ${isUnlocked ? patternDescription : 'Informations verrouillées - Débloquez cette espèce pour voir les détails'}
+                        <strong>Pattern de leurre:</strong> ${isUnlocked ? `<span style="color:#b8860b; font-weight:700;">${patternData.label}</span> — ${patternData.desc} <span style="opacity:.8">(Règle: ≤20px pendant 3s; correspondance ⇒ ≥90% de morsure)</span>` : 'Informations verrouillées - Débloquez cette espèce pour voir les détails'}
                     </div>
                 </div>
                 
@@ -6627,16 +7410,15 @@
                 tips.push("• Capture rapide - cette espèce se fatigue vite");
             }
             
-            // Conseils basés sur le pattern
-            if (fishType.baitPattern === 'hover') {
-                tips.push("• Maintenez votre souris au-dessus du poisson sans bouger");
-            } else if (fishType.baitPattern === 'still') {
-                tips.push("• Restez parfaitement immobile pendant l'approche");
-            } else if (fishType.baitPattern === 'moving') {
-                tips.push("• Bougez votre souris de manière constante et fluide");
-            } else if (fishType.baitPattern === 'bottom') {
-                tips.push("• Positionnez votre hameçon au fond de l'eau");
-            }
+            // Conseils basés sur le nouveau pattern
+            const p = fishType.baitPattern;
+            if (p === 'devant') tips.push("• Placez et gardez le curseur DEVANT le poisson (≤20px) pendant 3s");
+            else if (p === 'derriere') tips.push("• Restez DERRIÈRE le poisson (≤20px) pendant 3s en le suivant calmement");
+            else if (p === 'au_dessus') tips.push("• Maintenez la souris AU‑DESSUS du poisson (≤20px) pendant 3s");
+            else if (p === 'au_dessous') tips.push("• Maintenez la souris AU‑DESSOUS du poisson (≤20px) pendant 3s");
+            else if (p === 'toucher') tips.push("• Posez le curseur SUR le poisson (≤8px) pendant 3s pour le déclencher");
+            else if (p === 'complete') tips.push("• Balayez HAUT, BAS, GAUCHE, DROITE autour du poisson en 3s (≤20px)");
+            else if (p === 'any') tips.push("• Aucun pattern spécial requis (léger bonus quelle que soit la position)");
             
             // Conseils basés sur la rareté
             if (fishType.rarity === 'légendaire' || fishType.rarity === 'mythique') {
@@ -6648,11 +7430,15 @@
         
         // Gestionnaires d'événements pour les onglets
         const speciesTab = document.getElementById('tab-species');
+        const patternsTab = document.getElementById('tab-patterns');
         const hatsTab = document.getElementById('tab-hats');
         const achievementsTab = document.getElementById('tab-achievements');
         
         if (speciesTab) {
             speciesTab.addEventListener('click', () => switchGuideTab('species'));
+        }
+        if (patternsTab) {
+            patternsTab.addEventListener('click', () => switchGuideTab('patterns'));
         }
         
         if (hatsTab) {
@@ -6752,7 +7538,14 @@
         
         // Débloquer les chapeaux selon les stats
         const hats = gameState.progress.hats || { unlocked:[], owned:[], equipped:null };
-        const unlockIf = (cond, emoji) => { if (cond && !hats.unlocked.includes(emoji)) { hats.unlocked.push(emoji); showUnlockToast(emoji, 'Chapeau débloqué'); } };
+        const unlockIf = (cond, emoji) => { 
+            if (cond && !hats.unlocked.includes(emoji)) { 
+                hats.unlocked.push(emoji); 
+                showUnlockToast(emoji, 'Chapeau débloqué');
+                // Faire spawner le chapeau à la surface
+                spawnFloatingHat(emoji);
+            } 
+        };
         unlockIf((st.cumulativeScore||0) >= 5000, '🎩');
         unlockIf((st.totalCasts||0) >= 300, '🎓');
         unlockIf((st.surfaceHoldCumulative||0) >= 600, '👒');
@@ -6809,6 +7602,17 @@
         // Mettre à jour les listes du guide en temps réel
         if (typeof updateGuideLists === 'function') {
             updateGuideLists();
+        }
+
+        // Déblocage du slider de poids d'hameçon à 100 kg cumulés
+        const features = gameState.progress.features || (gameState.progress.features = { hookWeightUnlocked:false, hookWeightFactor:1 });
+        if (!features.hookWeightUnlocked && (st.cumulativeWeightKg || 0) >= 100) {
+            features.hookWeightUnlocked = true;
+            showUnlockToast('🪝', "Réglage de l'hameçon débloqué");
+            saveProgress();
+            // Afficher immédiatement si l'UI est présente
+            const wrap = document.getElementById('hook-weight-slider-wrap');
+            if (wrap) wrap.style.display = 'inline-flex';
         }
     }
 
