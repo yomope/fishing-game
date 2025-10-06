@@ -28,6 +28,12 @@ python -m http.server 5500
 - Clavier
   - `Échap` (Esc): fermer la fenêtre de jeu/retour
 
+### 📱 Contrôles mobiles
+
+- Tap court (au repos): lancer la ligne
+- Tap court (quand un poisson mord): ferrer
+- Glisser/slider pendant la pêche: rembobiner (intensité = vitesse du geste)
+
 Astuce: l’indicateur au curseur aide à visualiser la zone active et la tension.
 
 ---

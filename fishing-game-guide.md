@@ -38,7 +38,7 @@
 | **Vitesse** | 1.5 | 2.2 | Rapide |
 | **Points** | 11 | 15 | Faible récompense |
 | **Stamina** | 30 | 50 | Se fatigue vite |
-| **Profondeur** | 60% | 90% | Près du fond |
+| **Profondeur** | 5% | 25% | Très proche de la surface |
 | **Affinité morsure** | 50% | 70% | Mord facilement |
 | **Agressivité** | 30% | 50% | Moyennement curieuse |
 | **Flash** | 1.5s | 2.0s | Temps court |
@@ -58,7 +58,7 @@
 | **Vitesse** | 1.2 | 1.8 | Moyen |
 | **Points** | 27 | 32 | Récompense correcte |
 | **Stamina** | 50 | 70 | Résistance moyenne |
-| **Profondeur** | 40% | 80% | Toutes zones |
+| **Profondeur** | 15% | 35% | Peu profond |
 | **Affinité morsure** | 40% | 60% | Méfiant |
 | **Agressivité** | 40% | 60% | Équilibré |
 | **Flash** | 1.8s | 2.2s | Normal |
@@ -78,7 +78,7 @@
 | **Vitesse** | 0.8 | 1.3 | Lent |
 | **Points** | 28 | 48 | Bon score |
 | **Stamina** | 60 | 90 | Résistant |
-| **Profondeur** | 50% | 85% | Mi-eau à fond |
+| **Profondeur** | 20% | 45% | Faible à mi-profondeur |
 | **Affinité morsure** | 30% | 50% | Méfiant |
 | **Agressivité** | 20% | 40% | Calme |
 | **Flash** | 2.0s | 2.5s | Long |
@@ -98,7 +98,7 @@
 | **Vitesse** | 1.0 | 1.6 | Moyen |
 | **Points** | 20 | 24 | Standard |
 | **Stamina** | 40 | 60 | Faible |
-| **Profondeur** | 30% | 70% | Partout |
+| **Profondeur** | 10% | 30% | Très peu profond |
 | **Affinité morsure** | 45% | 65% | Mord facilement |
 | **Agressivité** | 50% | 70% | Curieux |
 | **Flash** | 1.5s | 2.0s | Court |
@@ -118,7 +118,7 @@
 | **Vitesse** | 1.8 | 2.5 | Très rapide |
 | **Points** | 34 | 67 | Bonne récompense |
 | **Stamina** | 70 | 100 | Très résistant |
-| **Profondeur** | 60% | 100% | Profondeurs |
+| **Profondeur** | 25% | 50% | Mi-profondeur |
 | **Affinité morsure** | 25% | 45% | Très méfiant |
 | **Agressivité** | 60% | 80% | Agressif |
 | **Flash** | 1.2s | 1.8s | Très court |
@@ -138,7 +138,7 @@
 | **Vitesse** | 0.9 | 1.5 | Lent |
 | **Points** | 65 | 85 | Très bon score |
 | **Stamina** | 90 | 130 | Extrêmement résistant |
-| **Profondeur** | 70% | 100% | Fond uniquement |
+| **Profondeur** | 30% | 55% | Tendance fond |
 | **Affinité morsure** | 20% | 40% | Très méfiant |
 | **Agressivité** | 30% | 50% | Calme |
 | **Flash** | 2.2s | 2.8s | Très long |
@@ -158,7 +158,7 @@
 | **Vitesse** | 0.4 | 0.8 | Très lent |
 | **Points** | 172 | 225 | **JACKPOT** |
 | **Stamina** | 150 | 220 | **Épuisant** |
-| **Profondeur** | 40% | 70% | Mi-eau |
+| **Profondeur** | 60% | 85% | Profond |
 | **Affinité morsure** | 15% | 30% | Extrêmement méfiant |
 | **Agressivité** | 10% | 30% | Paisible |
 | **Flash** | 2.5s | 3.5s | Maximum |
@@ -178,7 +178,7 @@
 | **Vitesse** | 0.5 | 0.9 | Très lent |
 | **Points** | 8 | 11 | Très faible |
 | **Stamina** | 20 | 40 | Très faible |
-| **Profondeur** | 20% | 60% | Surface à mi-eau |
+| **Profondeur** | 5% | 20% | Surface |
 | **Affinité morsure** | 60% | 80% | Mord très facilement |
 | **Agressivité** | 20% | 30% | Timide |
 | **Flash** | 1.0s | 1.5s | Minimum |
@@ -198,7 +198,7 @@
 | **Vitesse** | 1.0 | 1.6 | Moyen |
 | **Points** | 168 | 200 | **LÉGENDAIRE** |
 | **Stamina** | 120 | 180 | **Boss** |
-| **Profondeur** | 30% | 80% | Toutes zones |
+| **Profondeur** | 35% | 65% | Mi-profondeur |
 | **Affinité morsure** | 10% | 25% | **Quasi impossible** |
 | **Agressivité** | 40% | 70% | Imprévisible |
 | **Flash** | 2.8s | 3.5s | Maximum |
@@ -206,6 +206,29 @@
 | **Multiplicateur tension** | 0.64× | 0.80× | Tension forte |
 
 **🎯 Stratégie** : Approche l'hameçon du poisson et laisse-le couler rapidement vers lui. La capture la plus difficile du jeu ! Seulement 10-25% de chance de mordre. 👑🔥
+
+---
+
+### 🐉 DRAGON MARIN ⭐⭐⭐
+**Créature mythique des abysses, extrêmement rare et exigeante**
+
+| Paramètre | Min | Max | Notes |
+|-----------|-----|-----|-------|
+| **Taille** | 40 px | 60 px | ÉNORME |
+| **Vitesse** | 1.2 | 2.0 | Rapide |
+| **Points** | très élevés | — | Indexés sur rareté |
+| **Stamina** | 200 | 280 | Combat très long |
+| **Profondeur** | 85% | 98% | Limite deep/abyssal |
+| **Affinité morsure** | 10% | 25% | Très méfiant |
+| **Agressivité** | 50% | 80% | Agressif |
+| **Flash** | 2.5s | 3.5s | Long |
+| **Pattern préféré** | **`deep`** | - | Mouvement en profondeur |
+
+**🎯 Stratégie** : Reste en profondeur extrême et exécute des mouvements lents et profonds. Combat d’endurance; maîtrise la tension.
+
+Déblocage et succès:
+- Déblocage espèce: paliers élevés de captures totales (progression ×3).
+- Achievement: nécessite une série de 200 captures sans casse.
 
 ---
 
@@ -226,7 +249,8 @@
 
 ### 🔴 TRÈS DIFFICILE (Expert)
 8. **🐋 Baleine** - Très méfiant (15-30%), tension MAX, combat épuisant (150-220 stamina)
-9. **🧜‍♀️ Sirène** - **BOSS FINAL** - 10-25% de chance, pattern complexe, légendaire
+9. **🐉 Dragon Marin** - Mythique, 85-98% de profondeur, très rare, combat très long
+10. **🧜‍♀️ Sirène** - **BOSS FINAL** - 10-25% de chance, pattern complexe, légendaire
 
 ---
 
