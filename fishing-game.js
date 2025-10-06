@@ -133,6 +133,86 @@
         GAME_CONFIG.fish.types = window.FISH_CATALOG.types;
     }
 
+    // Overlay d'information gameplay pour progression vierge
+    function showGameplayInfoOverlay() {
+        if (document.getElementById('fishing-gameplay-info')) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'fishing-gameplay-info';
+        overlay.style.cssText = `
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(1200px 600px at 50% 85%, rgba(11,18,40,0.92), rgba(11,18,40,0.86) 30%, rgba(0,0,0,0.7) 70%);
+            z-index: 30000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(2px);
+        `;
+        const panel = document.createElement('div');
+        panel.style.cssText = `
+            width: min(840px, 92vw);
+            max-height: 82vh;
+            overflow: auto;
+            background: linear-gradient(160deg, rgba(15,42,107,0.96), rgba(30,58,138,0.96));
+            color: #fff;
+            padding: 24px 26px;
+            border-radius: 18px;
+            box-shadow: 0 30px 90px rgba(0,0,0,0.65), inset 0 0 60px rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.08);
+            font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif;
+        `;
+        panel.innerHTML = `
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
+                <h2 style="margin:0; font-size:26px; letter-spacing:0.5px; text-shadow:0 2px 8px rgba(0,0,0,0.35);">🌊 Bienvenue dans la Pêche</h2>
+                <div style="opacity:.9; font-size:18px;">🎣</div>
+            </div>
+            <p style="margin:0 0 16px 0; opacity:.92; font-size:14px;">Découvre les mécaniques principales pour progresser :</p>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px;">
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">🎯 Lancer</div>
+                    <div style="opacity:.9; font-size:13px;">Maintiens puis relâche pour jeter l'hameçon. Vise les zones de poissons.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">🧩 Patterns</div>
+                    <div style="opacity:.9; font-size:13px;">Chaque espèce préfère un pattern (moving/hover/still/falling). Consulte le Guide 📙.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">⚡ Tension</div>
+                    <div style="opacity:.9; font-size:13px;">Reste en zone sûre pour éviter la casse. Maîtrise le rembobinage.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">⏱️ Chrono</div>
+                    <div style="opacity:.9; font-size:13px;">Clique l'⏱️ en bas pour <u>activer/désactiver</u> le timer. Sans chrono: score/achievements et certaines stats sont désactivés.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">📏 Profondeurs</div>
+                    <div style="opacity:.9; font-size:13px;">Surface → shallow → mid → deep → abyssal. Certaines espèces n'apparaissent qu'à certaines profondeurs.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">🌤️ Cycle</div>
+                    <div style="opacity:.9; font-size:13px;">Heure, météo et saisons influencent couleur et comportements.</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px; grid-column: span 2;">
+                    <div style="font-size:16px; margin-bottom:6px;">🪟 Taille de fenêtre</div>
+                    <div style="opacity:.9; font-size:13px;">La fenêtre s'agrandit avec ton <strong>poids cumulé</strong> pour atteindre de nouvelles profondeurs. Plus tu pêches lourd, plus tu explores !</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px 14px;">
+                    <div style="font-size:16px; margin-bottom:6px;">🏅 Progression</div>
+                    <div style="opacity:.9; font-size:13px;">Cumule <em>kg</em> et <em>score</em>, débloque des chapeaux 🎩 et des espèces.</div>
+                </div>
+            </div>
+            <div style="margin-top:16px; display:flex; gap:10px;">
+                <button id="info-open-guide" style="background: linear-gradient(45deg, #10b981, #059669); color:#fff; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; box-shadow:0 4px 12px rgba(16,185,129,0.35);">Ouvrir le Guide 📙</button>
+                <button id="info-close" style="background: linear-gradient(45deg, #6b7280, #4b5563); color:#fff; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.25);">Commencer</button>
+            </div>
+        `;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        const close = ()=>{ if (overlay && overlay.parentNode) overlay.remove(); };
+        panel.querySelector('#info-close')?.addEventListener('click', close);
+        panel.querySelector('#info-open-guide')?.addEventListener('click', ()=>{ close(); showGuide(); });
+    }
+
     // Échelle de profondeur basée sur la fenêtre du navigateur
     let depthScale = {
         // Valeurs de référence en pixels pour une fenêtre de 1920x1080
@@ -969,7 +1049,7 @@
         container.innerHTML = `
             <div class="fishing-game-drag-handle"></div>
             <div class="fishing-game-header">
-                <div id="fishing-caught-display" style="font-size:24px;font-weight:bold;color:white;text-shadow:2px 2px 4px rgba(0,0,0,0.6);display:flex;align-items:center;gap:8px;">
+                <div id="fishing-caught-display" style="font-size:18px;font-weight:bold;color:white;text-shadow:2px 2px 4px rgba(0,0,0,0.6);display:flex;align-items:center;gap:6px;">
                     <span id="fishing-caught-list"></span>
                 </div>
             </div>
@@ -986,7 +1066,7 @@
                         <div>Meilleur: <span id="fishing-high-score">${gameState.highScore}</span></div>
                         <div>Poids: <span id="fishing-weight">0g</span></div>
                     </div>
-                    <button id="fishing-guide-btn" class="fishing-btn-primary" title="Guide" aria-label="Guide" style="min-width:auto;min-height:auto;padding:4px 8px;font-size:16px;margin-left:12px;cursor:pointer;">📙</button>
+                    
                 </div>
             </div>
             
@@ -1042,9 +1122,27 @@
         // Ajouter la fonctionnalité de déplacement
         makeDraggable(container);
         
-        // Bouton guide
-        const guideBtn = container.querySelector('#fishing-guide-btn');
-        if (guideBtn) guideBtn.addEventListener('click', showGuide);
+        // Bouton guide (fixe en haut-gauche)
+        let guideBtn = document.getElementById('fishing-guide-btn-fixed');
+        if (!guideBtn) {
+            guideBtn = document.createElement('button');
+            guideBtn.id = 'fishing-guide-btn-fixed';
+            guideBtn.title = 'Guide';
+            guideBtn.setAttribute('aria-label', 'Guide');
+            guideBtn.textContent = '📙';
+            guideBtn.style.cssText = 'position:fixed;top:10px;left:10px;z-index:10010;background:linear-gradient(135deg, rgba(15, 42, 107, 0.98), rgba(30, 58, 138, 0.98));color:white;border:none;border-radius:8px;padding:6px 10px;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+            document.body.appendChild(guideBtn);
+        }
+        guideBtn.onclick = showGuide;
+
+        // Affichage auto d'un écran d'information si progression vierge
+        try {
+            const st = gameState.progress?.stats || {};
+            const isZero = (st.totalCasts||0) === 0 && (st.cumulativeWeightKg||0) === 0 && (st.cumulativeScore||0) === 0;
+            if (isZero) {
+                showGameplayInfoOverlay();
+            }
+        } catch(e) { /* noop */ }
 
         // Initialiser le slider de poids d'hameçon si débloqué
         const features = gameState.progress.features || (gameState.progress.features = { hookWeightUnlocked:false, hookWeightFactor:1 });
@@ -1408,12 +1506,13 @@
             // Soleil
             const sunU = clamp01((t - SUN_START) / (SUN_END - SUN_START)); // 0..1 pendant la journée utile
             const sunX = -w/2 + w * sunU;
-            const sunY = apexY + (ySurface - apexY) * Math.pow(1 - Math.abs(sunX) / (w/2), 2);
+            // Parabole: centre (x=0) à apexY, bords (|x|=w/2) à ySurface
+            const sunY = apexY + (ySurface - apexY) * Math.pow((sunX) / (w/2), 2);
             const sunAlpha = sunActive ? fadeInOut(sunU) : 0;
             // Lune (wrap nuit -> matin)
             const moonU = clamp01((tn - MOON_START) / ((1 + MOON_END) - MOON_START));
             const moonX = -w/2 + w * moonU;
-            const moonY = apexY + (ySurface - apexY) * Math.pow(1 - Math.abs(moonX) / (w/2), 2);
+            const moonY = apexY + (ySurface - apexY) * Math.pow((moonX) / (w/2), 2);
             const moonAlpha = moonActive ? 0.95 * fadeInOut(moonU) : 0;
             for (const c of set) {
                 if (c.isSun) {
@@ -1628,7 +1727,106 @@
         }
     }
 
-    // Fonction pour obtenir les couleurs selon l'heure, la météo et la saison
+    // Fonction utilitaire: mélange linéaire entre deux couleurs hex
+    function lerpHex(c1, c2, t) {
+        const a = hexToRgb(c1);
+        const b = hexToRgb(c2);
+        const r = Math.round(a.r + (b.r - a.r) * t);
+        const g = Math.round(a.g + (b.g - a.g) * t);
+        const bch = Math.round(a.b + (b.b - a.b) * t);
+        return `rgb(${r},${g},${bch})`;
+    }
+
+    // Définition des palettes par saison et période pour un dégradé à 6 zones
+    // Périodes: night, dawn, day, dusk (avec night couvrant [0..0.2] et [0.85..1])
+    // Zones: [skyTop, skyBottom, surface, shallow, mid, deep, abyssal]
+    const BACKGROUND_PALETTES = {
+        spring: {
+            night:   ['#0a1128','#1e2a4a','#1e2a4a','#183460','#13386e','#0f2f63','#0b2249'],
+            dawn:    ['#ff6b9d','#ffa07a','#ffa07a','#c77b91','#8aa1b8','#4b6fa3','#27406a'],
+            day:     ['#87ceeb','#4a90d9','#4a90d9','#3e79c2','#2f60a6','#254e8c','#1b3c73'],
+            dusk:    ['#ff6b35','#ff8c42','#ff8c42','#cf6f4a','#9a5a5b','#4d4b7a','#28375c']
+        },
+        summer: {
+            night:   ['#081022','#152235','#152235','#11305a','#0f3568','#0b2c57','#071f3d'],
+            dawn:    ['#ff9e80','#ffccbc','#ffccbc','#caa6a5','#9bb1b8','#5a7ea6','#2c4f78'],
+            day:     ['#4fc3f7','#0288d1','#0288d1','#0275b6','#01609a','#014a7b','#013a62'],
+            dusk:    ['#ff5722','#ff7043','#ff7043','#cb5a53','#95576a','#4e4d7e','#2a3a62']
+        },
+        autumn: {
+            night:   ['#160d08','#24140c','#24140c','#2d2219','#2e2c28','#232b3a','#172136'],
+            dawn:    ['#ff6f00','#ff9e40','#ff9e40','#d7894a','#a37655','#5b5a62','#2e3f62'],
+            day:     ['#ff8a65','#ff6f00','#ff6f00','#d96108','#b3540a','#8a430d','#5e3210'],
+            dusk:    ['#bf360c','#d84315','#d84315','#b34a31','#8a524d','#4f4e76','#2b3a60']
+        },
+        winter: {
+            night:   ['#0a1020','#1a2430','#1a2430','#1a2e44','#17314a','#122a41','#0b1d2d'],
+            dawn:    ['#90caf9','#bbdefb','#bbdefb','#8db2d2','#6b8dac','#486b88','#2b4861'],
+            day:     ['#b0bec5','#607d8b','#607d8b','#516c80','#445a6a','#394857','#2b3742'],
+            dusk:    ['#5c6bc0','#7986cb','#7986cb','#6575b3','#505f97','#3d4b7b','#2b375f']
+        }
+    };
+
+    // Calcule la période courante
+    function getCurrentPeriod(t) {
+        if (t < 0.2) return 'night';
+        if (t < 0.3) return 'dawn';
+        if (t < 0.7) return 'day';
+        if (t < 0.85) return 'dusk';
+        return 'night';
+    }
+
+    // Retourne la palette complète (6 zones + ciel) selon saison/période et météo
+    function getBackgroundPalette() {
+        const t = gameState.renderTimeOfDay || gameState.timeOfDay || 0;
+        const season = (gameState.season === 'spring' || gameState.season === 'summer' || gameState.season === 'autumn' || gameState.season === 'winter') ? gameState.season : 'spring';
+        const period = getCurrentPeriod(t);
+        const base = BACKGROUND_PALETTES[season][period];
+        // base = [skyTop, skyBottom, surface, shallow, mid, deep, abyssal]
+
+        // Influence météo: assombrissement léger et teinte sur le ciel
+        const weather = gameState.weather;
+        const target = gameState.targetWeather;
+        const transition = gameState.weatherTransition || 0;
+        const eased = transition < 0.5 ? 2*transition*transition : 1 - Math.pow(-2*transition + 2, 3)/2;
+        const darknessMap = { clear: 0, cloudy: 0.04, rainy: 0.08, stormy: 0.14 };
+        const skyTintMap = {
+            clear:  '#000000',
+            cloudy: '#808080',
+            rainy:  '#4060a0',
+            stormy: '#203050'
+        };
+        const d1 = darknessMap[weather] || 0;
+        const d2 = darknessMap[target] || 0;
+        const darken = d1 + (d2 - d1) * eased;
+        const tint1 = skyTintMap[weather] || '#000000';
+        const tint2 = skyTintMap[target] || '#000000';
+        const skyTint = lerpHex(tint1, tint2, eased);
+
+        // Appliquer assombrissement et légère teinte sur skyTop/skyBottom, et assombrir progressivement les zones
+        const darkenColorHex = (hex, f) => darkenColor(hex, f);
+        const tintMix = (hex, tint, amount) => lerpColor(hex, tint, amount);
+
+        const skyTop = tintMix(darkenColorHex(base[0], darken), skyTint, Math.min(0.12 + darken*0.6, 0.35));
+        const skyBottom = tintMix(darkenColorHex(base[1], Math.min(darken*1.1, 0.5)), skyTint, Math.min(0.16 + darken*0.7, 0.4));
+        let surface = darkenColorHex(base[2], darken * 0.9);
+        let shallow = darkenColorHex(base[3], darken * 1.1);
+        let mid     = darkenColorHex(base[4], darken * 1.25);
+        let deep    = darkenColorHex(base[5], darken * 1.45);
+        let abyssal = darkenColorHex(base[6], Math.min(darken * 1.6, 0.9));
+
+        // Assombrissement supplémentaire demandé: eau plus sombre globalement vers le bas
+        const extra = { surface: 0.12, shallow: 0.2, mid: 0.35, deep: 0.55, abyssal: 0.75 };
+        surface = darkenColorHex(surface, extra.surface);
+        shallow = darkenColorHex(shallow, extra.shallow);
+        mid     = darkenColorHex(mid, extra.mid);
+        deep    = darkenColorHex(deep, extra.deep);
+        abyssal = darkenColorHex(abyssal, extra.abyssal);
+
+        return { skyTop, skyBottom, surface, shallow, mid, deep, abyssal };
+    }
+
+    // Fonction pour obtenir les couleurs selon l'heure, la météo et la saison (compat: renvoie ciel + eau)
     function getSkyColors() {
         const t = gameState.renderTimeOfDay || gameState.timeOfDay;
         let skyTop, skyBottom, waterColor;
@@ -1742,12 +1940,17 @@
 
     // Convertir hex en RGB
     function hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 135, g: 206, b: 235 };
+        if (typeof hex === 'string') {
+            const mRgb = hex.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+            if (mRgb) {
+                return { r: parseInt(mRgb[1], 10), g: parseInt(mRgb[2], 10), b: parseInt(mRgb[3], 10) };
+            }
+            const mHex = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            if (mHex) {
+                return { r: parseInt(mHex[1], 16), g: parseInt(mHex[2], 16), b: parseInt(mHex[3], 16) };
+            }
+        }
+        return { r: 135, g: 206, b: 235 };
     }
 
     // Fonction pour appliquer les perks des chapeaux (actuellement désactivé)
@@ -1959,35 +2162,21 @@
         const deepEnd = midEnd + deepZoneHeight;
         const abyssalEnd = deepEnd + abyssalZoneHeight;
         
-        // Gradient cohérent : ciel → eau de la même gamme de plus en plus sombre
-        mainGradient.addColorStop(0, blend.skyTop);
-        mainGradient.addColorStop(0.15, blend.skyTop);
-        mainGradient.addColorStop(waterLevel / canvas.height, blend.skyBottom);
-        
-        // Zone surface - utiliser la couleur du ciel du bas (même gamme)
-        const surfaceColor = blend.skyBottom;
-        mainGradient.addColorStop(surfaceEnd / canvas.height, surfaceColor);
-        
-        // Zone peu profonde - assombrir progressivement la couleur du ciel
-        const shallowColor = darkenColor(blend.skyBottom, 0.15);
-        mainGradient.addColorStop(shallowEnd / canvas.height, shallowColor);
-        
-        // Zone milieu - continuer l'assombrissement
-        const midColor = darkenColor(blend.skyBottom, 0.3);
-        mainGradient.addColorStop(midEnd / canvas.height, midColor);
-        
-        // Zone profonde - plus sombre
-        const deepColor = darkenColor(blend.skyBottom, 0.5);
-        mainGradient.addColorStop(deepEnd / canvas.height, deepColor);
-        
-        // Zone abyssale - très sombre
-        const abyssalColor = darkenColor(blend.skyBottom, 0.7);
-        mainGradient.addColorStop(abyssalEnd / canvas.height, abyssalColor);
-        
-        // Fond marin - le plus sombre de la gamme
-        const seabedColor = darkenColor(blend.skyBottom, 0.85);
+        // Utiliser la palette 6 zones dépendante saison/période/météo
+        const pal = getBackgroundPalette();
+        // Ciel
+        mainGradient.addColorStop(0, pal.skyTop);
+        mainGradient.addColorStop(Math.max(0.001, (waterLevel - 1) / canvas.height), pal.skyBottom);
+        // Bandes d'eau
+        mainGradient.addColorStop(surfaceEnd / canvas.height, pal.surface);
+        mainGradient.addColorStop(shallowEnd / canvas.height, pal.shallow);
+        mainGradient.addColorStop(midEnd / canvas.height, pal.mid);
+        mainGradient.addColorStop(deepEnd / canvas.height, pal.deep);
+        mainGradient.addColorStop(abyssalEnd / canvas.height, pal.abyssal);
+        // Fond marin: presque noir
+        const seabedColor = darkenColor(pal.abyssal, 0.92);
         mainGradient.addColorStop(seabedY / canvas.height, seabedColor);
-        mainGradient.addColorStop(1, darkenColor(blend.skyBottom, 0.9));
+        mainGradient.addColorStop(1, darkenColor(seabedColor, 0.04));
         
         // Nettoyer complètement le canvas puis appliquer le fond pour éviter toute rémanence
         ctx.save();
@@ -1997,16 +2186,7 @@
         ctx.fillStyle = mainGradient;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Petit indicateur de palette (debug visuel) en haut-gauche
-        try {
-            const sw = 12, sh = 12, pad = 6;
-            ctx.save();
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = blend.skyTop; ctx.fillRect(pad, pad, sw, sh);
-            ctx.fillStyle = blend.skyBottom; ctx.fillRect(pad + sw + 2, pad, sw, sh);
-            ctx.fillStyle = blend.waterColor; ctx.fillRect(pad + (sw + 2) * 2, pad, sw, sh);
-            ctx.restore();
-        } catch (e) { /* noop */ }
+        // (debug palette supprimé)
         
         // Nuages (par-dessus le dégradé)
         drawClouds(ctx, canvas);
@@ -2133,21 +2313,7 @@
             ctx.restore();
         }
         
-        // Afficher un indicateur de chapeaux disponibles (petit icône)
-        const ownedHats = gameState.progress?.hats?.owned || [];
-        if (ownedHats.length > 0) {
-            ctx.save();
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-            ctx.globalAlpha = 0.8;
-            ctx.font = '16px sans-serif';
-            ctx.fillStyle = '#fff';
-            ctx.fillText(`🎩 ${ownedHats.length}`, rodX + 50, rodY - 20);
-            ctx.restore();
-            
-            // Stocker la position pour la détection de clic
-            gameState.hatIndicatorPos = { x: rodX + 50, y: rodY - 20, width: 60, height: 20 };
-        }
+        // (Compteur chapeaux déplacé dans l'onglet du guide)
 
         // Canne
         ctx.strokeStyle = '#8b4513';
@@ -3199,9 +3365,16 @@
             if (!gameState.caughtFish || gameState.caughtFish.length === 0) {
                 caughtListElement.textContent = '';
             } else {
-                // Afficher les derniers 8 poissons capturés (ou moins si pas assez)
-                const recentFish = gameState.caughtFish.slice(-8);
-                caughtListElement.textContent = recentFish.join(' ');
+                // Résumé compact: regrouper par emoji et compter, afficher "emoji xN"
+                const counts = {};
+                for (const e of gameState.caughtFish) counts[e] = (counts[e]||0) + 1;
+                // Trier par fréquence décroissante puis par emoji
+                const summary = Object.entries(counts)
+                    .sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]))
+                    .slice(0, 8)
+                    .map(([emoji, n]) => `${emoji}x${n}`)
+                    .join('  ');
+                caughtListElement.textContent = summary;
             }
         }
     }
@@ -6436,7 +6609,7 @@
         `;
         
         guideWindow.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 2px solid #8b4513;">
+            <div id="guide-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 2px solid #8b4513; cursor: move; user-select: none;">
                 <h2 style="margin: 0; font-size: 24px; color: #8b4513;">📖 Guide de Pêche</h2>
                 <button id="guide-close" style="background: none; border: none; color: #8b4513; font-size: 24px; cursor: pointer; padding: 5px;">×</button>
             </div>
@@ -6492,7 +6665,7 @@
                 <!-- Onglet Chapeaux -->
                 <div id="content-hats" class="guide-content" style="display: none; height: 100%;">
                     <div style="flex: 1; padding: 20px; overflow-y: auto; border-right: 2px solid #8b4513;">
-                        <h3 style="color: #8b4513; margin-bottom: 15px;">🎩 Chapeaux Disponibles</h3>
+                <h3 style="color: #8b4513; margin-bottom: 15px;">🎩 Chapeaux Disponibles <span id="hats-counter" style="font-size:14px;color:#5b3a1a;opacity:0.9;margin-left:8px;"></span></h3>
                         <div id="hats-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
                             <!-- Liste des chapeaux sera générée ici -->
                         </div>
@@ -6519,6 +6692,67 @@
         `;
         
         document.body.appendChild(guideWindow);
+        // Chargement état sauvegardé (position/taille) ou centrage par défaut
+        const saveGuideState = () => {
+            try {
+                const r = guideWindow.getBoundingClientRect();
+                const state = { left: parseInt(guideWindow.style.left||r.left||0,10), top: parseInt(guideWindow.style.top||r.top||0,10), width: r.width, height: r.height };
+                localStorage.setItem('fishingGuideWindow', JSON.stringify(state));
+            } catch(e){ /* noop */ }
+        };
+        const loadGuideState = () => {
+            try {
+                const raw = localStorage.getItem('fishingGuideWindow');
+                if (!raw) return false;
+                const state = JSON.parse(raw);
+                if (!state || typeof state !== 'object') return false;
+                guideWindow.style.transform = 'none';
+                if (state.width && state.height) {
+                    guideWindow.style.width = Math.max(680, Math.min(window.innerWidth-20, Math.round(state.width))) + 'px';
+                    guideWindow.style.height = Math.max(420, Math.min(window.innerHeight-20, Math.round(state.height))) + 'px';
+                }
+                if (typeof state.left === 'number' && typeof state.top === 'number') {
+                    const r = guideWindow.getBoundingClientRect();
+                    const left = Math.min(window.innerWidth - 40, Math.max(-r.width + 40, state.left));
+                    const top = Math.min(window.innerHeight - 40, Math.max(0, state.top));
+                    guideWindow.style.left = left + 'px';
+                    guideWindow.style.top = top + 'px';
+                }
+                return true;
+            } catch(e){ return false; }
+        };
+        if (!loadGuideState()) {
+            try {
+                const rect = guideWindow.getBoundingClientRect();
+                guideWindow.style.transform = 'none';
+                guideWindow.style.left = Math.max(10, Math.round((window.innerWidth - rect.width) / 2)) + 'px';
+                guideWindow.style.top = Math.max(10, Math.round((window.innerHeight - rect.height) / 2)) + 'px';
+            } catch (e) { /* noop */ }
+        }
+        // Drag simple via l'en-tête
+        (function(winEl){
+            const header = winEl.querySelector('#guide-header');
+            if (!header) return;
+            let dragging=false, sx=0, sy=0, ox=0, oy=0;
+            header.addEventListener('mousedown', (e)=>{
+                if (e.target && (e.target.id==='guide-close' || e.target.closest('#guide-close'))) return;
+                dragging=true; sx=e.clientX; sy=e.clientY; ox=parseInt(winEl.style.left||'0',10); oy=parseInt(winEl.style.top||'0',10); document.body.style.userSelect='none';
+            });
+            window.addEventListener('mousemove', (e)=>{
+                if (!dragging) return;
+                const dx=e.clientX-sx, dy=e.clientY-sy; const r=winEl.getBoundingClientRect();
+                let nl=ox+dx, nt=oy+dy; nl=Math.min(window.innerWidth-40, Math.max(-r.width+40, nl)); nt=Math.min(window.innerHeight-40, Math.max(0, nt));
+                winEl.style.left=nl+'px'; winEl.style.top=nt+'px';
+            });
+            window.addEventListener('mouseup', ()=>{ if(dragging){ dragging=false; document.body.style.userSelect=''; saveGuideState(); } });
+        })(guideWindow);
+        // Resizer en bas-droit
+        const resizer=document.createElement('div'); resizer.id='guide-resizer'; resizer.style.cssText='position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:se-resize;background:linear-gradient(135deg, rgba(139,69,19,0.25), rgba(139,69,19,0.05));border-top-left-radius:4px;'; guideWindow.appendChild(resizer);
+        (function(winEl,handle){ let resizing=false,sx=0,sy=0,sw=0,sh=0; handle.addEventListener('mousedown',(e)=>{e.preventDefault();resizing=true;const r=winEl.getBoundingClientRect();sx=e.clientX;sy=e.clientY;sw=r.width;sh=r.height;document.body.style.userSelect='none';}); window.addEventListener('mousemove',(e)=>{ if(!resizing) return; const dx=e.clientX-sx, dy=e.clientY-sy; const minW=680,minH=420,maxW=Math.max(minW,window.innerWidth-20),maxH=Math.max(minH,window.innerHeight-20); winEl.style.width=Math.max(minW,Math.min(maxW,Math.round(sw+dx)))+'px'; winEl.style.height=Math.max(minH,Math.min(maxH,Math.round(sh+dy)))+'px'; }); window.addEventListener('mouseup',()=>{ if(resizing){ resizing=false; document.body.style.userSelect=''; saveGuideState(); } }); })(guideWindow,resizer);
+
+        // Sauvegarder à la fermeture (handler ajouté plus bas aussi, on utilise un id différent local)
+        const closeBtnForSave = document.getElementById('guide-close');
+        if (closeBtnForSave) closeBtnForSave.addEventListener('click', saveGuideState, { once:true });
         
         // Fonction pour obtenir les conditions de déblocage d'une espèce
         function getSpeciesUnlockInfo(emoji) {
@@ -6922,6 +7156,14 @@
                 
                 hatsList.appendChild(item);
             });
+
+            // Mettre à jour le compteur dans le titre
+            const counter = document.getElementById('hats-counter');
+            if (counter) {
+                const unlocked = (gameState.progress?.hats?.unlocked || []).length;
+                const owned = (gameState.progress?.hats?.owned || []).length;
+                counter.textContent = `(${owned} possédés / ${unlocked} débloqués)`;
+            }
         }
 
         // Fonction pour générer la liste des achievements
