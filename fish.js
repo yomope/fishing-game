@@ -25,8 +25,8 @@ window.FISH_CATALOG = {
             flashDuration: [1.8, 2.2],
             baitPattern: 'au_dessus',
             spawnWeight: 0.9,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Effectuer 70 lancers',
+            unlock: { type: 'casts_at_least', value: 70 }
         },
         { 
             emoji: '🐡', name: 'Poisson Ballon',
@@ -37,8 +37,8 @@ window.FISH_CATALOG = {
             flashDuration: [2.0, 2.5],
             baitPattern: 'au_dessus',
             spawnWeight: 0.8,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Capturer 30 poissons',
+            unlock: { type: 'total_catches_at_least', value: 30 }
         },
         { 
             emoji: '🐟', name: 'Poisson Commun',
@@ -47,7 +47,7 @@ window.FISH_CATALOG = {
             staminaRange: [40, 60], depthRange: [0.0, 0.5],
             biteAffinityRange: [0.45, 0.65], aggressionRange: [0.5, 0.7],
             flashDuration: [1.5, 2.0],
-            baitPattern: 'any',
+            baitPattern: 'devant',
             spawnWeight: 1.0,
             unlockText: 'Toujours disponible',
             unlock: { type: 'always' }
@@ -61,8 +61,8 @@ window.FISH_CATALOG = {
             flashDuration: [1.2, 1.8],
             baitPattern: 'au_dessous',
             spawnWeight: 0.7,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Visiter la zone profonde 5 fois',
+            unlock: { type: 'deep_visits_at_least', value: 5 }
         },
         { 
             emoji: '🐙', name: 'Pieuvre',
@@ -73,8 +73,8 @@ window.FISH_CATALOG = {
             flashDuration: [2.2, 2.8],
             baitPattern: 'derriere',
             spawnWeight: 0.6,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Rester 40s au fond',
+            unlock: { type: 'bottom_hold_at_least', value: 40 }
         },
         { 
             emoji: '🐋', name: 'Baleine',
@@ -85,8 +85,8 @@ window.FISH_CATALOG = {
             flashDuration: [2.5, 3.5],
             baitPattern: 'complete',
             spawnWeight: 0.15,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Poids cumulé 1000 kg',
+            unlock: { type: 'cumulative_weight_kg_at_least', value: 1000 }
         },
         { 
             emoji: '🪼', name: 'Méduse',
@@ -95,10 +95,10 @@ window.FISH_CATALOG = {
             staminaRange: [20, 40], depthRange: [0.05, 0.2],
             biteAffinityRange: [0.6, 0.8], aggressionRange: [0.2, 0.3],
             flashDuration: [1.0, 1.5],
-            baitPattern: 'moving',
+            baitPattern: 'au_dessus',
             spawnWeight: 1.1,
-            unlockText: 'Toujours disponible',
-            unlock: { type: 'always' }
+            unlockText: 'Effectuer 100 lancers',
+            unlock: { type: 'casts_at_least', value: 100 }
         },
         { 
             emoji: '🧜‍♀️', name: 'Sirène',
@@ -109,15 +109,15 @@ window.FISH_CATALOG = {
             flashDuration: [2.8, 3.5],
             baitPattern: 'complete',
             spawnWeight: 0.25,
-            unlockText: 'Débloqué par captures totales',
-            unlock: { type: 'total_catches_at_least', value: 240 }
+            unlockText: 'Capturer 5 espèces différentes',
+            unlock: { type: 'unique_species_at_least', value: 5 }
         },
         { emoji:'👾', name:'Créature Mystérieuse',
              sizeRange:[18,28], speedRange:[1.6,2.4],
              pointsPerSize:2.8, basePoints:60,
              staminaRange:[80,140], depthRange:[0.2,0.8],
              biteAffinityRange:[0.2,0.4], aggressionRange:[0.5,0.8], 
-            flashDuration:[1.5,2.2], baitPattern:'active', spawnWeight: 0.35, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 180 } },
+            flashDuration:[1.5,2.2], baitPattern:'active', spawnWeight: 0.35, unlockText: 'Casser 1500 lignes', unlock: { type: 'lines_broken_at_least', value: 1500 } },
              
         { 
             emoji: '🐊', name: 'Crocodile Marin',
@@ -125,7 +125,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 3.0, basePoints: 70,
             staminaRange: [110,170], depthRange: [0.1,0.4],
             biteAffinityRange: [0.2,0.35], aggressionRange: [0.6,0.9],
-            flashDuration: [1.2,1.8], baitPattern: 'devant', spawnWeight: 0.3, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 360 }
+            flashDuration: [1.2,1.8], baitPattern: 'devant', spawnWeight: 0.3, unlockText: 'Marquer 500 points en une partie', unlock: { type: 'best_session_score_at_least', value: 500 }
         },
         { 
             emoji: '🐢', name: 'Tortue de Mer',
@@ -133,7 +133,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 2.2, basePoints: 40,
             staminaRange: [130,180], depthRange: [0.45,0.75],
             biteAffinityRange: [0.25,0.45], aggressionRange: [0.1,0.3],
-            flashDuration: [2.2,3.0], baitPattern: 'still', spawnWeight: 0.5, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 210 }
+            flashDuration: [2.2,3.0], baitPattern: 'au_dessous', spawnWeight: 0.5, unlockText: 'Poids cumulé 200 kg', unlock: { type: 'cumulative_weight_kg_at_least', value: 200 }
         },
         { 
             emoji: '🦭', name: 'Phoque Curieux',
@@ -141,7 +141,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 2.4, basePoints: 45,
             staminaRange: [80,120], depthRange: [0.25,0.55],
             biteAffinityRange: [0.35,0.6], aggressionRange: [0.2,0.5],
-            flashDuration: [1.6,2.4], baitPattern: 'hover', spawnWeight: 0.7, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 150 }
+            flashDuration: [1.6,2.4], baitPattern: 'au_dessus', spawnWeight: 0.7, unlockText: 'Capturer 60 poissons', unlock: { type: 'total_catches_at_least', value: 60 }
         },
         { 
             emoji: '🦈', name: 'Requin',
@@ -149,7 +149,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 3.6, basePoints: 90,
             staminaRange: [160,220], depthRange: [0.55,0.8],
             biteAffinityRange: [0.15,0.35], aggressionRange: [0.7,0.95],
-            flashDuration: [1.0,1.6], baitPattern: 'moving', spawnWeight: 0.2, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 420 }
+            flashDuration: [1.0,1.6], baitPattern: 'devant', spawnWeight: 0.2, unlockText: 'Visiter les eaux moyennes 50 fois', unlock: { type: 'mid_visits_at_least', value: 50 }
         },
         { 
             emoji: '🐬', name: 'Dauphin',
@@ -157,7 +157,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 3.2, basePoints: 65,
             staminaRange: [100,150], depthRange: [0.35,0.6],
             biteAffinityRange: [0.4,0.7], aggressionRange: [0.2,0.5],
-            flashDuration: [1.4,2.0], baitPattern: 'active', spawnWeight: 0.5, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 240 }
+            flashDuration: [1.4,2.0], baitPattern: 'active', spawnWeight: 0.5, unlockText: 'Capturer 7 espèces différentes', unlock: { type: 'unique_species_at_least', value: 7 }
         },
         { 
             emoji: '🐉', name: 'Dragon Marin',
@@ -165,7 +165,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 4.5, basePoints: 120,
             staminaRange: [200,280], depthRange: [0.85,0.98],
             biteAffinityRange: [0.1,0.25], aggressionRange: [0.5,0.8],
-            flashDuration: [2.5,3.5], baitPattern: 'deep', spawnWeight: 0.05, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 1500 }
+            flashDuration: [2.5,3.5], baitPattern: 'deep', spawnWeight: 0.05, unlockText: 'Capturer 10 espèces différentes', unlock: { type: 'unique_species_at_least', value: 10 }
         },
         { 
             emoji: '🦞', name: 'Homard Géant',
@@ -173,7 +173,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 2.6, basePoints: 55,
             staminaRange: [120,170], depthRange: [0.5,0.8],
             biteAffinityRange: [0.2,0.4], aggressionRange: [0.3,0.6],
-            flashDuration: [1.8,2.6], baitPattern: 'bottom', spawnWeight: 0.45, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 200 }
+            flashDuration: [1.8,2.6], baitPattern: 'au_dessous', spawnWeight: 0.45, unlockText: 'Rester 60s au fond', unlock: { type: 'bottom_hold_at_least', value: 60 }
         },
         { 
             emoji: '🦀', name: 'Crabe Colossal',
@@ -181,7 +181,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 2.4, basePoints: 48,
             staminaRange: [110,160], depthRange: [0.45,1.0],
             biteAffinityRange: [0.25,0.45], aggressionRange: [0.2,0.5],
-            flashDuration: [1.8,2.8], baitPattern: 'still', spawnWeight: 0.5, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 170 }
+            flashDuration: [1.8,2.8], baitPattern: 'au_dessous', spawnWeight: 0.5, unlockText: 'Effectuer 250 lancers', unlock: { type: 'casts_at_least', value: 250 }
         },
         { 
             emoji: '🧜‍♂️', name: 'Triton',
@@ -189,7 +189,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 3.8, basePoints: 95,
             staminaRange: [140,200], depthRange: [0.5,0.8],
             biteAffinityRange: [0.15,0.35], aggressionRange: [0.4,0.7],
-            flashDuration: [2.0,3.0], baitPattern: 'hover', spawnWeight: 0.25, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 300 }
+            flashDuration: [2.0,3.0], baitPattern: 'derriere', spawnWeight: 0.25, unlockText: 'Poids cumulé 800 kg', unlock: { type: 'cumulative_weight_kg_at_least', value: 800 }
         },
         { 
             emoji: '🧜', name: 'Néréide',
@@ -197,7 +197,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 3.5, basePoints: 85,
             staminaRange: [120,180], depthRange: [0.35,0.7],
             biteAffinityRange: [0.2,0.4], aggressionRange: [0.3,0.6],
-            flashDuration: [2.0,3.0], baitPattern: 'hover', spawnWeight: 0.35, unlockText: 'Débloqué par captures totales', unlock: { type: 'total_catches_at_least', value: 220 }
+            flashDuration: [2.0,3.0], baitPattern: 'derriere', spawnWeight: 0.35, unlockText: 'Marquer 2000 points', unlock: { type: 'cumulative_score_at_least', value: 2000 }
         },
         { 
             emoji: '🥾', name: 'Botte Perdue',
@@ -205,7 +205,7 @@ window.FISH_CATALOG = {
             pointsPerSize: 0.2, basePoints: 0,
             staminaRange: [10,20], depthRange: [0.6,1.0],
             biteAffinityRange: [0.0,0.1], aggressionRange: [0,0.1],
-            flashDuration: [0.5,1.0], baitPattern: 'bottom', spawnWeight: 0.8, unlockText: 'Toujours disponible', unlock: { type: 'always' }
+            flashDuration: [0.5,1.0], baitPattern: 'au_dessous', spawnWeight: 0.8, unlockText: 'Casser 25 lignes', unlock: { type: 'lines_broken_at_least', value: 25 }
         }
     ]
 };

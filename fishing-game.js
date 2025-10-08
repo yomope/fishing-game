@@ -15,7 +15,7 @@
             airDrag: 0.12, // coefficient traînée air
             waterDrag: 1.8, // coefficient traînée eau (extrêmement augmenté à 1.8)
             reelSpeed: 190, // px/s rembobinage (un peu plus rapide)
-            maxLineLength: 1400, // longueur max de ligne (portée très accrue pour atteindre tout l'écran)
+            maxLineLength: 14000, // longueur max de ligne (portée très accrue pour atteindre tout l'écran)
             castSpeedFactor: 22.0, // facteur vitesse initiale (lancer puissant pour atteindre le bord)
             waterVerticalDamp: 0.94, // amortissement supplémentaire sur l'axe vertical sous l'eau (proche du maximum à 0.94)
             maxWaterVerticalSpeed: 50, // limite d'amplitude de vitesse verticale sous l'eau (extrêmement réduit à 50 px/s)
@@ -290,6 +290,13 @@
         hookWeightFactor: 1,
         // Effets visuels temporaires (ex: étincelles de pattern)
         effects: [],
+        // Références de rendu mises en cache
+        view: { canvas: null, ctx: null },
+        // Registres pour nettoyage systématique
+        timeouts: [],
+        intervals: [],
+        observers: [],
+        domController: null,
         _hatSpawnAccumulator: 0,
         bottomHoldSeconds: 0,
         surfaceHoldSeconds: 0,
@@ -704,38 +711,60 @@
         if (!container) return;
         
         const bounds = calculateWindowBoundsByWeight();
-        const currentWeight = Math.max(gameState.totalWeight, (gameState.progress?.stats?.cumulativeWeightKg || 0) * 1000);
-        
-        if (currentWeight > 0) {
-            // Appliquer bornes min/max
-            container.style.minWidth = bounds.min.width + 'px';
-            container.style.minHeight = bounds.min.height + 'px';
-            container.style.maxWidth = bounds.max.width + 'px';
-            container.style.maxHeight = bounds.max.height + 'px';
-        }
+        // Appliquer bornes min/max (toujours, même à 0 kg)
+        container.style.minWidth = bounds.min.width + 'px';
+        container.style.minHeight = bounds.min.height + 'px';
+        container.style.maxWidth = bounds.max.width + 'px';
+        container.style.maxHeight = bounds.max.height + 'px';
+
+        // Clamper la taille actuelle si elle dépasse le max autorisé
+        const rect = container.getBoundingClientRect();
+        const clampedH = Math.min(rect.height, bounds.max.height);
+        const clampedW = Math.min(rect.width, bounds.max.width);
+        if (rect.height !== clampedH) container.style.height = clampedH + 'px';
+        if (rect.width !== clampedW) container.style.width = clampedW + 'px';
+
+        try { calculateDepthScale(); adjustCanvasSize(); } catch(_) {}
     }
 
     // Calculer bornes min/max de fenêtre via courbe exponentielle décroissante
     function calculateWindowBoundsByWeight() {
-        const maxWeight = 3000000; // 3 tonnes (en grammes)
-        const minWidth = 640, minHeight = 220; // taille mini de jeu
-        const baseWidth = 800, baseHeight = 245; // taille par défaut
-        const browserMaxWidth = Math.floor(window.innerWidth * 0.9);
-        const browserMaxHeight = Math.floor(window.innerHeight * 0.9);
+        // Objectif: atteindre la hauteur max à 1 tonne cumulée
+        const targetWeightForMax = 1000000; // 1 tonne (en grammes)
+        // Détection mobile (pointeur grossier ou petit viewport)
+        const isCoarse = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(pointer: coarse)').matches : false;
+        const vw = Math.max(0, window.innerWidth || 0);
+        const vh = Math.max(0, window.innerHeight || 0);
+        // Fenêtre max = 90% du viewport utilisateur
+        const availW = Math.floor(vw * 0.9);
+        const availH = Math.floor(vh * 0.9);
+        // Tailles mini adaptées: plus petites sur mobile
+        const minWidth = isCoarse ? 280 : 640;
+        const minHeight = isCoarse ? 180 : 220;
+        const baseWidth = 800, baseHeight = 180; // taille par défaut
+        // Limites max utilisables dans le navigateur (90% du viewport)
+        const browserMaxWidth = Math.max(1, availW);
+        const browserMaxHeight = Math.max(1, availH);
         const savedWeight = (gameState.progress?.stats?.cumulativeWeightKg || 0) * 1000;
         const currentWeight = Math.max(gameState.totalWeight, savedWeight);
 
-        const x = Math.min(1, Math.max(0, currentWeight / maxWeight));
-        // f(x) = 1 - e^{-k x}, k contrôle la pente
-        const k = 2.0;
-        const f = 1 - Math.exp(-k * x);
+        // Progression (linéaire) de 0 à 1 jusqu'à 1 tonne
+        const g = Math.min(1, Math.max(0, currentWeight / targetWeightForMax));
+        // Courbe exponentielle normalisée (déblocage rapide au début, palier ensuite)
+        const k = 2.5; // courbure (≥1). Plus grand => plus de gains au début
+        const p = (1 - Math.exp(-k * g)) / (1 - Math.exp(-k));
 
-        const maxW = Math.round(baseWidth + (browserMaxWidth - baseWidth) * f);
-        const maxH = Math.round(baseHeight + (browserMaxHeight - baseHeight) * f);
+        // Max largeur: inchangé (atteignable dès le départ)
+        const maxW = browserMaxWidth;
+        // Max hauteur: à 0 kg == minHeight, à 1 t == 90% du viewport (avec progression exponentielle)
+        const maxH = Math.round(minHeight + (browserMaxHeight - minHeight) * p);
         // min croît plus lentement, garde une fenêtre jouable dès le départ
-        const minFactor = 0.4 * f; // 0 -> 0, 1 -> 0.4
-        const minW = Math.round(minWidth + (baseWidth - minWidth) * minFactor);
-        const minH = Math.round(minHeight + (baseHeight - minHeight) * minFactor);
+        const minFactor = 0.4 * g; // 0 -> 0, 1 -> 0.4
+        let minW = Math.round(minWidth + (baseWidth - minWidth) * minFactor);
+        let minH = Math.round(minHeight + (baseHeight - minHeight) * minFactor);
+        // Garantir que min <= max et rentre dans l'écran
+        minW = Math.min(minW, maxW);
+        minH = Math.min(minH, maxH);
 
         return { min: { width: minW, height: minH }, max: { width: maxW, height: maxH } };
     }
@@ -744,6 +773,20 @@
     function spawnFloatingHat(emoji) {
         const canvas = document.querySelector('.fishing-game-canvas');
         if (!canvas) return;
+        
+        // Vérifier si le chapeau est débloqué mais pas encore possédé
+        const unlockedHats = gameState.progress?.hats?.unlocked || [];
+        const ownedHats = gameState.progress?.hats?.owned || [];
+        
+        if (!unlockedHats.includes(emoji) || ownedHats.includes(emoji)) {
+            return; // Ne pas spawner si pas débloqué ou déjà possédé
+        }
+        
+        // Vérifier qu'il n'y a pas déjà une instance de ce chapeau sur l'écran
+        const alreadyFloating = gameState.floatingHats.some(hat => hat.emoji === emoji);
+        if (alreadyFloating) {
+            return; // Ne pas spawner de doublon
+        }
         
         const hat = {
             emoji: emoji,
@@ -825,9 +868,15 @@
         if (!hats.owned.includes(hat.emoji)) {
             hats.owned.push(hat.emoji);
         }
+        gameState.progress.hats = hats;
         
         // Sauvegarder la progression
         saveProgress();
+        
+        // Mettre à jour le guide si ouvert
+        if (typeof window.updateGuideLists === 'function') {
+            window.updateGuideLists(true);
+        }
         
         // Afficher une notification
         showUnlockToast(hat.emoji, 'Chapeau collecté !');
@@ -1087,7 +1136,7 @@
             <!-- Slider de poids d'hameçon en overlay côté gauche, aligné verticalement comme la jauge de profondeur -->
             <div id="hook-weight-slider-wrap" style="display:none; position:absolute; left:8px; top:50%; transform:translateY(-50%); width:36px; height:160px; z-index:10001; align-items:center; justify-content:center;">
                 <div title="Poids de l'hameçon" style="position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:12px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);">🪝</div>
-                <input id="hook-weight-slider" type="range" min="0.5" max="1.2" step="0.1" value="${(Math.max(0.5, Math.min(1.2, gameState.progress?.features?.hookWeightFactor||1)))}" style="-webkit-appearance: none; appearance: none; position:absolute; left:50%; top:50%; transform: translate(-50%, -50%) rotate(-90deg); width:140px; height:6px; border-radius:4px; background:linear-gradient(90deg,#fca5a5,#ef4444); outline:none;">
+                <input id="hook-weight-slider" type="range" min="0.5" max="3.0" step="0.05" value="${(Math.max(0.5, Math.min(3.0, gameState.progress?.features?.hookWeightFactor||1)))}" style="-webkit-appearance: none; appearance: none; position:absolute; left:50%; top:50%; transform: translate(-50%, -50%) rotate(-90deg); width:160px; height:6px; border-radius:4px; background:linear-gradient(90deg,#fca5a5,#ef4444); outline:none;">
                 <div id="hook-weight-value" style="position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:11px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);">${(gameState.progress?.features?.hookWeightFactor||1).toFixed(1)}×</div>
             </div>
 
@@ -1161,12 +1210,54 @@
         }
         guideBtn.onclick = showGuide;
 
-        // Affichage auto d'un écran d'information si progression vierge
+        // Poignée de redimensionnement pour mobile (coin bas-droit)
         try {
-            const st = gameState.progress?.stats || {};
-            const isZero = (st.totalCasts||0) === 0 && (st.cumulativeWeightKg||0) === 0 && (st.cumulativeScore||0) === 0;
-            if (isZero) {
-                showGameplayInfoOverlay();
+            const resizer = document.createElement('div');
+            resizer.id = 'fishing-resizer';
+            resizer.style.cssText = 'position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;background:linear-gradient(135deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05));border-top-left-radius:4px;z-index:10002;touch-action:none;';
+            container.appendChild(resizer);
+            let resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
+            const onPointerDown = (e) => {
+                e.preventDefault();
+                const r = container.getBoundingClientRect();
+                resizing = true;
+                startX = e.clientX; startY = e.clientY;
+                startW = r.width; startH = r.height;
+                document.body.style.userSelect = 'none';
+            };
+            const onPointerMove = (e) => {
+                if (!resizing) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                const bounds = calculateWindowBoundsByWeight();
+                const newW = Math.max(bounds.min.width, Math.min(bounds.max.width, Math.round(startW + dx)));
+                const newH = Math.max(bounds.min.height, Math.min(bounds.max.height, Math.round(startH + dy)));
+                container.style.width = newW + 'px';
+                container.style.height = newH + 'px';
+                try { adjustCanvasSize(); } catch(_) {}
+            };
+            const onPointerUp = () => {
+                if (!resizing) return;
+                resizing = false;
+                document.body.style.userSelect = '';
+                saveWindowState();
+            };
+            resizer.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+            window.addEventListener('pointercancel', onPointerUp);
+        } catch(_) { /* noop */ }
+
+        // Affichage auto une seule fois pour les nouveaux joueurs (flag persistant)
+        try {
+            const hasSeen = localStorage.getItem('fishingWelcomeShown') === '1';
+            if (!hasSeen) {
+                const st = gameState.progress?.stats || {};
+                const isZero = (st.totalCasts||0) === 0 && (st.cumulativeWeightKg||0) === 0 && (st.cumulativeScore||0) === 0;
+                if (isZero) {
+                    showGameplayInfoOverlay();
+                    localStorage.setItem('fishingWelcomeShown', '1');
+                }
             }
         } catch(e) { /* noop */ }
 
@@ -1179,12 +1270,12 @@
             if (features.hookWeightUnlocked) {
                 sliderWrap.style.display = 'inline-flex';
             }
-            const current = Math.max(0.5, Math.min(1.2, Number(features.hookWeightFactor || 1)));
+            const current = Math.max(0.5, Math.min(3.0, Number(features.hookWeightFactor || 1)));
             slider.value = String(current);
             sliderVal.textContent = `${current.toFixed(1)}×`;
             gameState.hookWeightFactor = current;
             slider.addEventListener('input', () => {
-                const v = Math.max(0.5, Math.min(1.2, Number(slider.value)));
+                const v = Math.max(0.5, Math.min(3.0, Number(slider.value)));
                 gameState.hookWeightFactor = v;
                 features.hookWeightFactor = v;
                 sliderVal.textContent = `${v.toFixed(1)}×`;
@@ -1389,7 +1480,11 @@
             }
         });
         resizeObserver.observe(container);
+        gameState.observers.push(resizeObserver);
         
+        // Mettre en cache pour éviter les lectures DOM côté boucle
+        gameState.view.canvas = canvas;
+        gameState.view.ctx = ctx;
         return { canvas, ctx };
     }
 
@@ -1410,7 +1505,7 @@
                 });
                 
                 // Incrémenter le compteur de casses seulement si le timer est activé
-                if (gameState.timerEnabled && gameState.progress?.stats) {
+                if (isProgressionEnabled() && gameState.progress?.stats) {
                     gameState.progress.stats.lineBreaks = (gameState.progress.stats.lineBreaks || 0) + 1;
                     gameState.progress.stats.currentNoBreakStreak = 0;
                     gameState.progress.stats.gameDeaths = (gameState.progress.stats.gameDeaths || 0) + 1;
@@ -1981,14 +2076,63 @@
         return { r: 135, g: 206, b: 235 };
     }
 
-    // Fonction pour appliquer les perks des chapeaux (actuellement désactivé)
+    // Fonction pour appliquer les perks des chapeaux ET des achievements
     function applyHatPerks() {
-        return {
+        const basePerks = {
             lineColor: null,
             lineGlow: false,
             spawnMultiplier: 1,
-            pointMultiplier: 1
+            pointMultiplier: 1,
+            reelSpeed: 1,
+            tensionResistance: 1,
+            breakResistance: 1,
+            weightMultiplier: 1
         };
+        
+        // Appliquer les bonus des achievements débloqués
+        const achievements = gameState.progress?.achievements || {};
+        const stats = gameState.progress?.stats || {};
+        
+        // Chaque achievement donne un petit bonus permanent
+        if (achievements.firstCatch || (stats.totalCatches || 0) >= 1) {
+            basePerks.reelSpeed *= 1.02; // +2% vitesse de rembobinage
+        }
+        if (achievements.tenCatches || (stats.totalCatches || 0) >= 10) {
+            basePerks.breakResistance *= 1.05; // +5% résistance ligne
+        }
+        if (achievements.fiftyCatches || (stats.totalCatches || 0) >= 50) {
+            basePerks.weightMultiplier *= 1.03; // +3% poids des poissons
+        }
+        if (achievements.hundredCatches || (stats.totalCatches || 0) >= 100) {
+            basePerks.tensionResistance *= 1.1; // +10% résistance tension
+        }
+        if (achievements.firstCast || (stats.totalCasts || 0) >= 1) {
+            basePerks.reelSpeed *= 1.01; // +1% vitesse de rembobinage
+        }
+        if (achievements.tenCasts || (stats.totalCasts || 0) >= 10) {
+            basePerks.breakResistance *= 1.03; // +3% résistance ligne
+        }
+        if (achievements.hundredCasts || (stats.totalCasts || 0) >= 100) {
+            basePerks.reelSpeed *= 1.05; // +5% vitesse de rembobinage
+        }
+        if (achievements.bottomHold40 || (stats.longestBottomHold || 0) >= 40) {
+            basePerks.weightMultiplier *= 1.05; // +5% poids des poissons
+        }
+        if (achievements.highscore200 || (gameState.highScore || 0) >= 200) {
+            basePerks.pointMultiplier *= 1.1; // +10% points
+        }
+        if (achievements.firstDeep || (stats.deepVisits || 0) >= 1) {
+            basePerks.tensionResistance *= 1.03; // +3% résistance tension
+        }
+        if (achievements.firstSurface || (stats.surfaceHoldCumulative || 0) >= 10) {
+            basePerks.reelSpeed *= 1.03; // +3% vitesse de rembobinage
+        }
+        if (achievements.firstPerfect || (stats.perfectScores || 0) >= 1) {
+            basePerks.breakResistance *= 1.1; // +10% résistance ligne
+            basePerks.weightMultiplier *= 1.05; // +5% poids des poissons
+        }
+        
+        return basePerks;
     }
 
     // Fonction pour afficher des messages toast
@@ -2376,8 +2520,8 @@
             const isUnder = end.y > GAME_CONFIG.water.level;
             let baseSag = Math.min(40, dist * 0.12) * (isUnder ? 1.2 : 0.6);
             if (isUnder) {
-                const weight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
-                baseSag *= (1 + 0.20 * (weight - 1));
+        const weight = Math.max(0.5, Math.min(3.0, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+        baseSag *= (1 + 0.10 * (weight - 1));
             }
             const sag = baseSag * (1 - tension * 0.8); // 20% de courbure max quand très tendu
             const ctrl1 = { x: start.x + dx * 0.33, y: start.y + dy * 0.33 + sag };
@@ -2431,8 +2575,8 @@
             const d = Math.hypot(dx, dy) || 1;
             const ux = dx / d, uy = dy / d;
             // Mise à l'échelle visuelle de l'hameçon en fonction du poids (slider)
-            const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
-            const hookScale = hookWeight; // échelle 1:1 par simplicité et lisibilité
+        const hookWeight = Math.max(0.5, Math.min(3.0, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+        const hookScale = 1 + (hookWeight - 1) * 0.33; // impact visuel réduit
             const anchorBack = (GAME_CONFIG.hook.size * hookScale) * -0.2; // davantage vers la gauche
             const angle = Math.atan2(dy, dx);
             ctx.save();
@@ -2657,6 +2801,11 @@
 
     // Fonction pour générer de nouveaux poissons (taux par seconde, plafonné)
     function spawnFishTimed(deltaSec, canvas) {
+        // Vérifier si le spawn automatique est activé (mode test)
+        if (window.testToolsState && window.testToolsState.autoSpawnEnabled === false) {
+            return; // Pas de spawn si désactivé
+        }
+        
         const maxFishCount = calculateMaxFishCount();
         if (gameState.fish.length >= maxFishCount) return;
         gameState.spawnAccumulator += GAME_CONFIG.fish.spawnPerSecond * deltaSec;
@@ -2720,6 +2869,11 @@
             }
             if (fishType.emoji === '🐡' && perks.pufferSizeBonus) {
                 size *= perks.pufferSizeBonus;
+            }
+            
+            // Multiplicateur de poids (mode test)
+            if (window.testToolsState && window.testToolsState.weightMultiplier !== 1.0) {
+                size *= window.testToolsState.weightMultiplier;
             }
             
             // Vitesse de base tirée de la plage
@@ -2989,8 +3143,8 @@
     // Fonction pour vérifier les collisions avec l'hameçon
     // Fonction pour analyser le pattern de mouvement du curseur
     function analyzeBaitPattern(targetFishOverride) {
-        // Nouvelle mécanique: 6 patterns à 20px autour du poisson, maintien 3s
-        // Patterns: 'devant', 'derriere', 'au_dessus', 'au_dessous', 'toucher', 'complete'
+        // Mécanique de détection des patterns d'appât
+        // Patterns disponibles: 'devant', 'derriere', 'au_dessus', 'au_dessous', 'complete', 'active', 'deep'
         const history = gameState.cursorMovementHistory || [];
         if (!history.length) return { type: 'unknown', score: 0 };
         
@@ -3056,34 +3210,90 @@
         let score = 0;
         let spentMs = 0;
         
-        // Priorité aux patterns directionnels maintenus
-        if (msFront >= needed && msFront > msBack + 200) {
-            detected = 'devant';
-            score = Math.min(1, msFront / needed);
-            spentMs = msFront;
-        } else if (msBack >= needed && msBack > msFront + 200) {
-            detected = 'derriere';
-            score = Math.min(1, msBack / needed);
-            spentMs = msBack;
-        } else if (msAbove >= needed && msAbove > msBelow + 200) {
-            detected = 'au_dessus';
-            score = Math.min(1, msAbove / needed);
-            spentMs = msAbove;
-        } else if (msBelow >= needed && msBelow > msAbove + 200) {
-            detected = 'au_dessous';
-            score = Math.min(1, msBelow / needed);
-            spentMs = msBelow;
-        } /*
-        else if (seenAbove && seenBelow && seenLeft && seenRight) {
-            // COMPLETE (désactivé temporairement pour diagnostic)
+        // Calculer la vitesse de déplacement du curseur (pour pattern "active")
+        let totalMovement = 0;
+        let totalStillTime = 0;
+        const stillThreshold = 5; // pixels
+        for (let i = 1; i < samples.length; i++) {
+            const b = samples[i];
+            const a = samples[i-1];
+            const moveDistance = Math.hypot((b.x ?? 0) - (a.x ?? 0), (b.y ?? 0) - (a.y ?? 0));
+            totalMovement += moveDistance;
+            if (moveDistance < stillThreshold) {
+                totalStillTime += Math.max(0, b.ts - a.ts);
+            }
+        }
+        
+        // Détection pattern "deep" - appât est dans les profondeurs (> 80% de la hauteur)
+        const canvasHeight = document.getElementById('gameCanvas')?.height || 600;
+        const waterLevel = GAME_CONFIG.water.level || 100;
+        const depthRatio = (gameState.hookPosition.y - waterLevel) / canvasHeight;
+        const isDeep = depthRatio > 0.8;
+        
+        // Priorité aux patterns spéciaux
+        if (isDeep && samples.length >= 30) {
+            // Pattern "deep" - rester en profondeur avec le poisson
+            const fx = targetFish.x ?? 0;
+            const fy = targetFish.y ?? 0;
+            let msNearFishDeep = 0;
+            for (let i = 1; i < samples.length; i++) {
+                const b = samples[i];
+                const a = samples[i-1];
+                const dt = Math.max(0, b.ts - a.ts);
+                const dx = (b.x ?? 0) - fx;
+                const dy = (b.y ?? 0) - fy;
+                const dist = Math.hypot(dx, dy);
+                if (dist <= nearRadius) {
+                    msNearFishDeep += dt;
+                }
+            }
+            if (msNearFishDeep >= needed * 0.8) {
+                detected = 'deep';
+                score = Math.min(1, msNearFishDeep / (needed * 0.8));
+                spentMs = msNearFishDeep;
+            }
+        } else if (totalMovement > 300 && totalStillTime < 500 && samples.length >= 30) {
+            // Pattern "active" - mouvements rapides et variés autour du poisson
+            const movementScore = Math.min(1, totalMovement / 500);
+            const stillPenalty = Math.max(0, 1 - (totalStillTime / 1000));
+            score = movementScore * stillPenalty;
+            if (score > 0.6) {
+                detected = 'active';
+                spentMs = windowMs;
+            }
+        }
+        
+        // Patterns directionnels maintenus (si pas déjà détecté)
+        if (detected === 'unknown') {
+            if (msFront >= needed && msFront > msBack + 200) {
+                detected = 'devant';
+                score = Math.min(1, msFront / needed);
+                spentMs = msFront;
+            } else if (msBack >= needed && msBack > msFront + 200) {
+                detected = 'derriere';
+                score = Math.min(1, msBack / needed);
+                spentMs = msBack;
+            } else if (msAbove >= needed && msAbove > msBelow + 200) {
+                detected = 'au_dessus';
+                score = Math.min(1, msAbove / needed);
+                spentMs = msAbove;
+            } else if (msBelow >= needed && msBelow > msAbove + 200) {
+                detected = 'au_dessous';
+                score = Math.min(1, msBelow / needed);
+                spentMs = msBelow;
+            }
+        }
+        
+        // Pattern "complete" (circulaire)
+        if (detected === 'unknown' && seenAbove && seenBelow && seenLeft && seenRight) {
             const minPerQuadrant = 250; // ms
             if (msAbove >= minPerQuadrant && msBelow >= minPerQuadrant && msLeft >= minPerQuadrant && msRight >= minPerQuadrant) {
                 detected = 'complete';
                 const coverMs = (msAbove + msBelow + msLeft + msRight) / 4;
                 score = Math.min(1, coverMs / needed);
+                spentMs = coverMs;
             }
         }
-        */
         
         // Log + effet visuel quand un pattern est détecté (même sans morsure), avec un petit throttle
         if (detected !== 'unknown') {
@@ -3140,13 +3350,10 @@
                 const perks = applyHatPerks();
                 
                 // Nouvelle règle: si le pattern correspond à l'espèce, la morsure est GARANTIE
-                // Les espèces peuvent définir baitPattern parmi: 'devant','derriere','au_dessus','au_dessous','complete','any'
+                // Les espèces peuvent définir baitPattern parmi: 'devant','derriere','au_dessus','au_dessous','complete','active','deep'
                 let biteProb = underRefusal ? 0 : (fish.biteAffinity || 0.5);
                 let patternGuaranteed = false;
-                if (fish.baitPattern === 'any') {
-                    // Léger bonus générique
-                    biteProb *= 1.2;
-                } else if (
+                if (
                     (baitPattern.type && fish.baitPattern && baitPattern.type === fish.baitPattern) ||
                     (fish._patternBoostUntil && Date.now() < fish._patternBoostUntil && (!fish.baitPattern || fish._patternBoostType === fish.baitPattern))
                 ) {
@@ -3273,6 +3480,11 @@
         if (!gameState.effects) return;
         gameState.effects.forEach(e => { e.age += deltaSec; });
         gameState.effects = gameState.effects.filter(e => e.age < e.life);
+        // Cap dur pour éviter la croissance non bornée
+        const MAX_EFFECTS = 200;
+        if (gameState.effects.length > MAX_EFFECTS) {
+            gameState.effects.length = MAX_EFFECTS;
+        }
     }
 
     function drawEffects(ctx) {
@@ -3366,6 +3578,8 @@
                 highScoreElement.style.textDecoration = 'none';
             }
         }
+
+        // Activer/désactiver le chrono ne réinitialise plus la partie en cours
         
         // Mettre à jour le niveau
         if (levelElement) {
@@ -3540,10 +3754,12 @@
             updatePowerBar();
             gameState.isPreviewingCast = false;
             gameState.previewPoints = [];
-            // Stat lancers
-            gameState.progress.stats.totalCasts = (gameState.progress.stats.totalCasts || 0) + 1;
-            saveProgress();
-            if (gameState.timerEnabled) checkUnlocks();
+            // Stat lancers (seulement si chrono activé)
+            if (gameState.timerEnabled) {
+                gameState.progress.stats.totalCasts = (gameState.progress.stats.totalCasts || 0) + 1;
+                saveProgress();
+                checkUnlocks();
+            }
         }
     }
 
@@ -3559,13 +3775,13 @@
         gameState._wasUnderWater = isUnderWater;
         const drag = isUnderWater ? GAME_CONFIG.physics.waterDrag : GAME_CONFIG.physics.airDrag;
         // Gravité (le poids de l'hameçon ne s'applique que sous l'eau)
-        const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+        const hookWeight = Math.max(0.5, Math.min(3.0, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
         if (isUnderWater) {
-            // Effet plus fort du poids: gravité accrue proportionnelle au carré du facteur
-            const weightForce = hookWeight * hookWeight; // quadratique
-            gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * weightForce * deltaSec * 0.50; // 0.35 -> 0.50
+            // Impact moindre: interpolation douce autour de 1
+            const weightForce = 1 + (hookWeight - 1) * 0.35;
+            gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * weightForce * deltaSec * 0.40;
             // Flottabilité uniforme (même comportement vide/avec poisson), atténuée par le poids
-            const buoyMul = 1 / (0.7 + 0.3 * hookWeight); // 1x à 0.5x
+            const buoyMul = 1 / (0.8 + 0.2 * hookWeight); // réduit l'écart avec 1
             gameState.hookVelocity.y -= (GAME_CONFIG.physics.attachedBuoyancy || 0) * buoyMul * deltaSec;
         } else {
             gameState.hookVelocity.y += GAME_CONFIG.physics.gravity * deltaSec;
@@ -3579,7 +3795,7 @@
             gameState.hookVelocity.y *= (1 - Math.min(0.95, Math.max(0, (1 - damp)) ) * Math.min(1, deltaSec * 5));
             // limiter la vitesse verticale max sous l'eau (plus lourds => plafond plus élevé)
             const baseVmaxY = GAME_CONFIG.physics.maxWaterVerticalSpeed || 200;
-            const vmaxY = baseVmaxY * (0.9 + 0.6 * Math.max(1, hookWeight));
+            const vmaxY = baseVmaxY * (1.0 + 0.3 * Math.max(0, hookWeight - 1));
             if (gameState.hookVelocity.y > vmaxY) gameState.hookVelocity.y = vmaxY;
             if (gameState.hookVelocity.y < -vmaxY) gameState.hookVelocity.y = -vmaxY;
         }
@@ -3809,8 +4025,8 @@
             }
         } else {
             // Ligne vide: logique alignée, mais l'effet du poids sur la tension est fortement réduit
-            const hookWeight = Math.max(0.5, Math.min(1.2, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
-            const sizeMultiplier = 0.45; // quasi constant pour minimiser l'impact du poids
+            const hookWeight = Math.max(0.5, Math.min(3.0, gameState.hookWeightFactor || (gameState.progress?.features?.hookWeightFactor || 1)));
+            const sizeMultiplier = 0.40; // impact réduit
             const reelForce = (gameState.isReeling ? GAME_CONFIG.physics.reelSpeed * (0.25 + 0.75 * gameState.reelIntensity) : 0.0001);
             let targetTension = 0.10;
             // Composante de rembobinage similaire à la branche avec poisson
@@ -3836,6 +4052,12 @@
                 tension = Math.max(targetTension, (gameState.lineTension || 0) - maxDelta);
             }
         }
+        
+        // Appliquer le multiplicateur de tension (mode test)
+        if (window.testToolsState && window.testToolsState.tensionMultiplier !== 1.0) {
+            tension *= window.testToolsState.tensionMultiplier;
+        }
+        
         gameState.lineTension = Math.max(0, Math.min(1, tension));
 
         // Casse de ligne en fonction de la tension
@@ -3853,8 +4075,18 @@
             base *= perks.breakResistance;
         }
         
+        // Résistance de la ligne (mode test)
+        if (window.testToolsState && window.testToolsState.lineResistance && window.testToolsState.lineResistance !== 1.0) {
+            base *= window.testToolsState.lineResistance;
+        }
+        
         // Ligne incassable (chapeau robot)
         if (perks.unbreakableLine) {
+            base = 999; // Pratiquement incassable
+        }
+        
+        // Ligne incassable (mode test)
+        if (window.testToolsState && window.testToolsState.unbreakableLine) {
             base = 999; // Pratiquement incassable
         }
         
@@ -3882,6 +4114,11 @@
                 // Vitesse de fuite vers la gauche et légèrement vers le bas
                 escapingFish.escapeVx = -(200 + Math.random() * 150);
                 escapingFish.escapeVy = 50 + Math.random() * 100;
+                
+                // Mettre à jour le guide si ouvert (stats mises à jour après ligne cassée)
+                if (typeof window.updateGuideLists === 'function') {
+                    window.updateGuideLists(true);
+                }
             }
             
             // Incrémenter le compteur de casses et réinitialiser le streak sans casse
@@ -3996,6 +4233,11 @@
                     
                     // Tracking par espèce pour les achievements
                     const emoji = att.fish.emoji || '🐟';
+                    
+                    // Mettre à jour le compteur par emoji
+                    if (!gameState.progress.statsByEmoji) gameState.progress.statsByEmoji = {};
+                    gameState.progress.statsByEmoji[emoji] = (gameState.progress.statsByEmoji[emoji] || 0) + 1;
+                    
                     if (emoji === '🧜‍♀️') gameState.progress.stats.sirensCaught = (gameState.progress.stats.sirensCaught || 0) + 1;
                     if (emoji === '🐙') gameState.progress.stats.octopusCaught = (gameState.progress.stats.octopusCaught || 0) + 1;
                     if (emoji === '🐋') gameState.progress.stats.whalesCaught = (gameState.progress.stats.whalesCaught || 0) + 1;
@@ -4028,19 +4270,19 @@
                 }
                 
                 // Mettre à jour les statistiques de captures (toutes espèces confondues) seulement si timer activé
-                if (gameState.timerEnabled) {
+                if (isProgressionEnabled()) {
                 if (!gameState.progress.stats) gameState.progress.stats = {};
                 gameState.progress.stats.totalCatches = (gameState.progress.stats.totalCatches || 0) + fishCount;
                 }
                 // Captures transformées (compter seulement celles marquées _wasTransformed) seulement si timer activé
-                if (gameState.timerEnabled) {
+                if (isProgressionEnabled()) {
                 const transformedNow = gameState.attachedFish.reduce((acc, att) => acc + (att.fish._wasTransformed ? 1 : 0), 0);
                 if (transformedNow > 0) {
                     gameState.progress.stats.transformedCatches = (gameState.progress.stats.transformedCatches || 0) + transformedNow;
                 }
                 }
                 // Captures avec stamina encore > 0 seulement si timer activé
-                if (gameState.timerEnabled) {
+                if (isProgressionEnabled()) {
                 const staminaAliveNow = gameState.attachedFish.reduce((acc, att) => acc + ((att.fish.stamina || 0) > 0 ? 1 : 0), 0);
                 if (staminaAliveNow > 0) {
                     gameState.progress.stats.staminaAliveCatches = (gameState.progress.stats.staminaAliveCatches || 0) + staminaAliveNow;
@@ -4159,6 +4401,11 @@
                 // Retirer les poissons attrapés du monde
                 const toRemove = new Set(gameState.attachedFish.map(att => att.fish));
                 gameState.fish = gameState.fish.filter(f => !toRemove.has(f));
+                
+                // Mettre à jour le guide si ouvert (stats mises à jour après capture)
+                if (typeof window.updateGuideLists === 'function') {
+                    window.updateGuideLists(true);
+                }
             }
             gameState.attachedFish = [];
             gameState.isCasting = false;
@@ -4215,6 +4462,10 @@
             gameState.castPower = 0;
             updatePowerBar();
             
+            // Mettre à jour le guide si ouvert (pour les barres de progression)
+            if (typeof window.updateGuideLists === 'function') {
+                window.updateGuideLists(true); // Rafraîchissement immédiat
+            }
         }
     }
 
@@ -4239,11 +4490,12 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawBackground(ctx, canvas);
         drawBubbles(ctx, canvas);
+        // Dessiner l'indicateur de souris entre le décor et les poissons
+        drawMouseIndicator(ctx);
         drawFish(ctx);
         drawFloatingHats(ctx, canvas);
         drawFishingRod(ctx, canvas);
         drawCastPreview(ctx);
-        drawMouseIndicator(ctx);
         drawCustomCursor(ctx);
         drawDepthIndicator(ctx, canvas);
         // Dessiner les effets en dernier (par-dessus tout)
@@ -4293,7 +4545,10 @@
         const minRadius = 15;
         const maxRadius = 50;
         const tensionRadius = minRadius + (maxRadius - minRadius) * t;
-        const finalRadius = tensionRadius * gameState.indicatorScale;
+        // Sur mobile (pointer: coarse), multiplier x5
+        const isCoarse = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(pointer: coarse)').matches : false;
+        const deviceScale = isCoarse ? 5 : 1;
+        const finalRadius = tensionRadius * gameState.indicatorScale * deviceScale;
         
         // Dessiner le cercle principal avec le corps coloré
         ctx.save();
@@ -4365,24 +4620,25 @@
 
     // Fonction pour calculer l'échelle de profondeur basée sur la fenêtre du navigateur
     function calculateDepthScale() {
-        const windowWidth = window.innerWidth;
-        const windowHeight = window.innerHeight;
-        
-        // Calculer l'échelle basée sur la hauteur de la fenêtre
-        const heightScale = windowHeight / depthScale.referenceWindow.height;
-        
-        // Calculer l'échelle basée sur la largeur de la fenêtre (pour l'équilibre)
-        const widthScale = windowWidth / depthScale.referenceWindow.width;
-        
-        // Utiliser la moyenne des deux échelles pour un équilibre
-        const averageScale = (heightScale + widthScale) / 2;
-        
-        // Appliquer un facteur de correction pour éviter les échelles trop extrêmes
-        const correctedScale = Math.max(0.3, Math.min(3.0, averageScale));
-        
+        // Utiliser la taille réelle du canvas (ou de la fenêtre si indisponible)
+        const canvas = document.getElementById('fishing-canvas');
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        const targetWidth = Math.max(1, (rect && rect.width) ? rect.width : (window.innerWidth || depthScale.referenceWindow.width));
+        const targetHeight = Math.max(1, (rect && rect.height) ? rect.height : (window.innerHeight || depthScale.referenceWindow.height));
+
+        // Échelle selon la taille visible du canvas
+        const heightScale = targetHeight / depthScale.referenceWindow.height;
+        const widthScale = targetWidth / depthScale.referenceWindow.width;
+
+        // Pondération: mobile favorise la hauteur, desktop moyenne simple
+        const isCoarse = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(pointer: coarse)').matches : false;
+        const weightH = isCoarse ? 0.7 : 0.5;
+        const weightW = 1 - weightH;
+        const mixedScale = heightScale * weightH + widthScale * weightW;
+
+        // Clamp raisonnable
+        const correctedScale = Math.max(0.3, Math.min(3.0, mixedScale));
         depthScale.currentScale = correctedScale;
-        
-        
         return correctedScale;
     }
 
@@ -4705,10 +4961,10 @@
         const deltaSec = (now - lastTime) / 1000;
         lastTime = now;
         
-        // Récupérer le canvas de rendu
-        const canvasEl = document.getElementById('fishing-canvas');
-        
-        // Mise à jour temps/jour/météo/saisons
+        // Récupérer le canvas de rendu (mis en cache)
+        const canvasEl = gameState.view.canvas || document.getElementById('fishing-canvas');
+
+        // Mise à jour temps/jour/météo/saisons (intègre l'ancien backgroundLoop)
         updateDayNightCycle(deltaSec);
         updateSeasons(deltaSec);
         if (canvasEl) updateWeather(deltaSec, canvasEl);
@@ -4747,12 +5003,25 @@
                 gameState.progress.stats.longestBottomHold = Math.max(gameState.progress.stats.longestBottomHold, gameState.bottomHoldSeconds);
                 // cumul bas niveau (pour homard)
                 gameState.progress.stats.bottomHoldCumulative = (gameState.progress.stats.bottomHoldCumulative || 0) + deltaSec;
-                if (!gameState.progress.achievements.bottomHold40 && gameState.bottomHoldSeconds >= 40) {
-                if (gameState.timerEnabled) {
+                
+                // Déblocage Pieuvre (40s au fond)
+                if (!gameState.progress.achievements.bottomHold40 && gameState.progress.stats.longestBottomHold >= 40) {
                     gameState.progress.achievements.bottomHold40 = true;
                     if (!gameState.progress.unlockedSpecies.includes('🐙')) gameState.progress.unlockedSpecies.push('🐙');
                     saveProgress();
+                    if (gameState.timerEnabled) {
+                        showUnlockToast('🐙', 'Pieuvre');
+                    }
                 }
+                
+                // Déblocage Homard Géant (60s au fond)
+                if (!gameState.progress.achievements.bottomHold60 && gameState.progress.stats.longestBottomHold >= 60) {
+                    gameState.progress.achievements.bottomHold60 = true;
+                    if (!gameState.progress.unlockedSpecies.includes('🦞')) gameState.progress.unlockedSpecies.push('🦞');
+                    saveProgress();
+                    if (gameState.timerEnabled) {
+                        showUnlockToast('🦞', 'Homard Géant');
+                    }
                 }
             } else {
                 gameState.bottomHoldSeconds = 0;
@@ -4770,6 +5039,13 @@
                 gameState.progress.stats.deepVisits = (gameState.progress.stats.deepVisits || 0) + 1;
             } else if (!inDeep && gameState._wasDeep) {
                 gameState._wasDeep = false;
+            }
+            // Comptage des visites en zone moyenne (frontière franchie vers la zone 0.3-0.7)
+            if (inMid && !gameState._wasMid) {
+                gameState._wasMid = true;
+                gameState.progress.stats.midVisits = (gameState.progress.stats.midVisits || 0) + 1;
+            } else if (!inMid && gameState._wasMid) {
+                gameState._wasMid = false;
             }
             saveProgress();
             checkUnlocks();
@@ -4819,7 +5095,7 @@
         // Dessin principal
         const canvasNode = document.getElementById('fishing-canvas');
         if (canvasNode) {
-            const ctx = canvasNode.getContext('2d');
+            const ctx = gameState.view.ctx || canvasNode.getContext('2d');
             drawGame(ctx, canvasNode);
         }
         
@@ -4887,14 +5163,22 @@
     // Fonction pour terminer le jeu
     function endGame() {
         // Laisser l'animation et l'écran du jeu continuer de bouger
-        // Désactiver simplement le chrono pour éviter de relancer endGame
-        gameState.timerEnabled = false;
+        // Conserver l'état du chrono pour finaliser les achievements/compteurs, puis le couper
+        const wasTimedGame = !!gameState.timerEnabled;
         if (gameState.score > gameState.highScore) {
             gameState.highScore = gameState.score;
             localStorage.setItem('fishingHighScore', String(gameState.highScore));
         }
-        // Déblocage sirène si highscore >=200
-        if (gameState.timerEnabled) {
+        
+        // Mettre à jour le meilleur score de session
+        if (!gameState.progress.stats) gameState.progress.stats = {};
+        const currentSessionScore = gameState.score || 0;
+        if (currentSessionScore > (gameState.progress.stats.bestSessionScore || 0)) {
+            gameState.progress.stats.bestSessionScore = currentSessionScore;
+        }
+        
+        // Déblocage sirène si highscore >=200 (seulement parties chronométrées)
+        if (wasTimedGame) {
             if (!gameState.progress.achievements.highscore200 && gameState.highScore >= 200) {
                 gameState.progress.achievements.highscore200 = true;
                 if (!gameState.progress.unlockedSpecies.includes('🧜‍♀️')) gameState.progress.unlockedSpecies.push('🧜‍♀️');
@@ -4902,6 +5186,8 @@
             checkUnlocks();
         }
         saveProgress();
+        // Désactiver le chrono après sauvegarde et vérifications
+        gameState.timerEnabled = false;
         // reset puissance/preview
         gameState.castPower = 0;
         updatePowerBar();
@@ -4927,6 +5213,16 @@
             container.remove(); 
         }
         if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+        // Nettoyage global: intervals, timeouts, observers, listeners
+        try {
+            gameState.intervals.forEach(id => { try { clearInterval(id); } catch(_){} });
+            gameState.intervals = [];
+            gameState.timeouts.forEach(id => { try { clearTimeout(id); } catch(_){} });
+            gameState.timeouts = [];
+            gameState.observers.forEach(obs => { try { obs.disconnect?.(); } catch(_){} });
+            gameState.observers = [];
+            if (gameState.domController) { try { gameState.domController.abort(); } catch(_){} }
+        } catch(_){ }
         // reset puissance/preview
         gameState.castPower = 0;
         updatePowerBar();
@@ -5099,15 +5395,24 @@
             }
         }
         
-        requestAnimationFrame(backgroundLoop);
+        // Ne lancer l'animation de fond que si le jeu n'est pas en cours
+        if (!gameState.isPlaying) {
+            requestAnimationFrame(backgroundLoop);
+        }
     }
     
     // Fonction pour configurer les événements
     function setupEventListeners() {
+        // Utiliser AbortController pour un nettoyage global
+        if (gameState.domController) {
+            try { gameState.domController.abort(); } catch(_) {}
+        }
+        gameState.domController = new AbortController();
+        const signal = gameState.domController.signal;
         // Bouton de fermeture
         const closeBtn = document.getElementById('fishing-close-btn');
         if (closeBtn) {
-            closeBtn.addEventListener('click', closeGame);
+            closeBtn.addEventListener('click', closeGame, { signal });
         }
         
         // Touche Échap pour fermer
@@ -5116,8 +5421,12 @@
                 closeGame();
                 document.removeEventListener('keydown', handleEscape);
             }
+            // Touche T pour ouvrir les outils de test
+            if (e.key === 't' || e.key === 'T') {
+                showTestTools();
+            }
         };
-        document.addEventListener('keydown', handleEscape);
+        document.addEventListener('keydown', handleEscape, { signal });
         
         // Redimensionnement de la fenêtre du navigateur - recalculer l'échelle de profondeur
         let windowResizeTimeout;
@@ -5140,7 +5449,7 @@
                 }
             }, 100);
         };
-        window.addEventListener('resize', handleWindowResize);
+        window.addEventListener('resize', handleWindowResize, { signal });
         
         // Gestionnaire pour les changements de position et taille de la fenêtre de jeu
         const gameContainer = document.querySelector('.fishing-game-container');
@@ -5154,9 +5463,10 @@
             const newMaxCount = calculateMaxFishCount();
         });
             gameResizeObserver.observe(gameContainer);
+        gameState.observers.push(gameResizeObserver);
             
             // Détecter les changements de position via MutationObserver
-            const positionObserver = new MutationObserver(() => {
+        const positionObserver = new MutationObserver(() => {
                 removeLineOnResize();
                 saveWindowState(); // Sauvegarder la nouvelle position
             });
@@ -5164,6 +5474,7 @@
                 attributes: true,
                 attributeFilter: ['style']
             });
+        gameState.observers.push(positionObserver);
             
             // Détecter les changements de position via les événements de la fenêtre
             let lastPosition = { x: 0, y: 0 };
@@ -5184,12 +5495,13 @@
             // Nettoyer l'intervalle quand le jeu se ferme
             // Stocker l'intervalle pour le nettoyer plus tard
             gameContainer._positionCheckInterval = positionCheckInterval;
+            gameState.intervals.push(positionCheckInterval);
         }
         
         // Bouton de démarrage
         const startBtn = document.getElementById('fishing-start-btn');
         if (startBtn) {
-            startBtn.addEventListener('click', startGame);
+            startBtn.addEventListener('click', startGame, { signal });
         }
         
             // Événements sur le canvas (souris + pointer/tactile)
@@ -5212,14 +5524,14 @@
                 const p = getCanvasPoint(e);
                 gameState.mouseX = p.x;
                 gameState.mouseY = p.y;
-            });
+            }, { signal });
             
             // Stocker la position de la souris pour l'indicateur
             canvas.addEventListener('mousemove', (e) => {
                 const p = getCanvasPoint(e);
                 gameState.mouseX = p.x;
                 gameState.mouseY = p.y;
-            });
+            }, { signal });
             
             canvas.addEventListener('mousedown', (e) => {
                 const p = getCanvasPoint(e);
@@ -5250,8 +5562,52 @@
                     gameState.reelIntensity = 0;
                     gameState.isPreviewingCast = true;
                     powerInterval = setInterval(() => { chargePower(); updateCastPreview(); }, 50);
+                    gameState.intervals.push(powerInterval);
                 } else {
                     // Mode rembobiner
+                    // Mode test: attacher automatiquement au poisson sous le curseur
+                    if (window.testToolsState && window.testToolsState.autoAttach && gameState.attachedFish.length === 0) {
+                        // Trouver le poisson le plus proche du curseur
+                        let closestFish = null;
+                        let closestDist = Infinity;
+                        
+                        for (const fish of gameState.fish) {
+                            if (fish.isAttached || fish.escaping) continue;
+                            const dx = fish.x - gameState.mouseX;
+                            const dy = fish.y - gameState.mouseY;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist < closestDist && dist < 150) { // Rayon de détection de 150px
+                                closestDist = dist;
+                                closestFish = fish;
+                            }
+                        }
+                        
+                        if (closestFish) {
+                            // Téléporter l'hameçon sur le poisson
+                            gameState.hookPosition.x = closestFish.x;
+                            gameState.hookPosition.y = closestFish.y;
+                            gameState.hookVelocity.x = 0;
+                            gameState.hookVelocity.y = 0;
+                            
+                            // Attacher immédiatement avec un offset minimal
+                            const baseOffX = 0;
+                            const baseOffY = 0;
+                            closestFish.caught = true;
+                            closestFish.stamina = Math.max(1, 60 + closestFish.size * 4);
+                            closestFish.rushUntil = performance.now() + 1500;
+                            gameState.attachedFish.push({ 
+                                fish: closestFish, 
+                                offsetX: baseOffX, 
+                                offsetY: baseOffY, 
+                                baseOffX, 
+                                baseOffY, 
+                                phase: Math.random() * Math.PI * 2 
+                            });
+                            createCaptureEffect(closestFish.x, closestFish.y);
+                            console.log('[Test] Auto-attach:', closestFish.emoji, closestFish.name, '@ position', closestFish.x.toFixed(0), closestFish.y.toFixed(0));
+                        }
+                    }
+                    
                     // Si une morsure est en attente et encore valide, on valide la prise
                     const now = Date.now();
                     if (gameState.pendingBiteFish && now < gameState.pendingBiteFish.expiresAt) {
@@ -5284,7 +5640,7 @@
                     gameState.isReeling = true;
                     gameState.reelHold = true;
                 }
-            });
+            }, { signal });
             
             canvas.addEventListener('mouseup', () => {
                 gameState.isMouseDown = false;
@@ -5295,14 +5651,14 @@
                 } else {
                     gameState.reelHold = false;
                 }
-            });
+            }, { signal });
             
             canvas.addEventListener('mouseleave', () => {
                 gameState.isMouseDown = false;
                 if (powerInterval) { clearInterval(powerInterval); powerInterval = null; }
                 gameState.isPreviewingCast = false;
                 gameState.reelHold = false;
-            });
+            }, { signal });
 
                 // Pointer Events (tactile + stylet + souris unifiée)
                 let pointerActive = false;
@@ -5406,10 +5762,10 @@
                     gameState.reelHold = false;
                     gameState.isMouseDown = false;
                 };
-                canvas.addEventListener('pointerdown', onPointerDown);
-                canvas.addEventListener('pointermove', onPointerMove);
-                canvas.addEventListener('pointerup', onPointerUp);
-                canvas.addEventListener('pointercancel', onPointerCancel);
+                canvas.addEventListener('pointerdown', onPointerDown, { signal });
+                canvas.addEventListener('pointermove', onPointerMove, { signal });
+                canvas.addEventListener('pointerup', onPointerUp, { signal });
+                canvas.addEventListener('pointercancel', onPointerCancel, { signal });
         }
         
         // Double-clic sur le fond de la page pour remettre la fenêtre à sa taille et position par défaut
@@ -5631,7 +5987,12 @@
         if (restartBtn) {
             restartBtn.addEventListener('click', () => {
                 gameOverWindow.remove();
-            startGame();
+                // Rejouer avec chrono activé
+                gameState.timerEnabled = true;
+                // Conserver les compteurs/achievements cumulés; ne pas réinitialiser la progression
+                gameState.gameStartTime = 0; // repart à 60s jusqu'au premier lancer
+                gameState.timeLeft = 60;
+                startGame();
             });
         }
         
@@ -5677,6 +6038,10 @@
                 setupEventListeners();
                 // Démarrer immédiatement l'animation du fond et le spawn des poissons
                 initBackgroundAnimation();
+                // Vérifier les déblocages au démarrage
+                checkUnlocks();
+                // Synchroniser la progression avec les espèces débloquées
+                syncProgressWithUnlocks();
                 // Démarrer automatiquement la partie
                 startGame();
             }
@@ -5707,6 +6072,11 @@
             const encoded = match.split('=')[1];
             return JSON.parse(decodeURIComponent(escape(atob(encoded))));
         } catch (_) { return null; }
+    }
+    function deleteCookie(name) {
+        try {
+            document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        } catch (_) {}
     }
 
     // Fonction pour créer la fenêtre de gestion des cookies avancée
@@ -5986,7 +6356,7 @@
                 <div style="display: flex; gap: 10px;">
                     <select id="add-species-select" style="background: rgba(0,0,0,0.3); color: white; border: 1px solid #374151; border-radius: 5px; padding: 5px;">
                         <option value="">Ajouter une espèce...</option>
-                        ${GAME_CONFIG.species.map(s => `<option value="${s.emoji}">${s.emoji} ${s.name}</option>`).join('')}
+                        ${GAME_CONFIG.fish.types.map(s => `<option value="${s.emoji}">${s.emoji} ${s.name}</option>`).join('')}
                     </select>
                     <button onclick="addSpecies()" style="background: #10b981; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Ajouter</button>
                 </div>
@@ -6068,7 +6438,7 @@
 
             speciesList.innerHTML = `
                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
-                    ${GAME_CONFIG.species.map(s => {
+                    ${GAME_CONFIG.fish.types.map(s => {
                         const isUnlocked = species.includes(s.emoji);
                         return `
                             <div style="background: ${isUnlocked ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; padding: 10px; border-radius: 5px; border: 1px solid ${isUnlocked ? '#10b981' : '#ef4444'};">
@@ -6274,6 +6644,7 @@
                     unlockedSpecies: ['🦐','🐟'],
                     achievements: { 
                         bottomHold40: false, 
+                        bottomHold60: false,
                         highscore200: false,
                         firstCatch: false,
                         tenCatches: false,
@@ -6355,14 +6726,24 @@
                     },
                     hats: { unlocked: [], owned: [], equipped: null }
                 };
+                // Effacer les cookies existants pour repartir d'un état propre
+                deleteCookie('fishingProgress');
+                deleteCookie('fishingWindowState');
+
+                // Mettre à jour les zones de texte
                 progressTextarea.value = JSON.stringify(defaultProgress, null, 2);
+                windowTextarea.value = JSON.stringify({}, null, 2);
                 
                 // Appliquer immédiatement la réinitialisation
-                setCookie('fishingProgress', defaultProgress, 365);
                 gameState.progress = defaultProgress;
+                setCookie('fishingProgress', defaultProgress, 365);
                 updateScoreDisplay();
                 updateCaughtFishDisplay();
                 updateTimeAndSeasonDisplay();
+                
+                // Réévaluer les déblocages de base et rafraîchir le guide
+                if (typeof checkUnlocks === 'function') checkUnlocks();
+                if (typeof updateGuideLists === 'function') updateGuideLists();
                 
                 showStatus('🔄 Progression réinitialisée et appliquée');
             }
@@ -6499,7 +6880,7 @@
     function loadProgress() {
         const def = {
             unlockedSpecies: ['🦐','🐟'], // espèces de départ
-            achievements: { bottomHold40:false, highscore200:false },
+            achievements: { bottomHold40:false, bottomHold60:false, highscore200:false },
             stats: {
                 longestBottomHold: 0,
                 surfaceHoldCumulative: 0, // cumul proche surface (s)
@@ -6548,6 +6929,7 @@
                 talkCatches: 0,
                 transformedCatches: 0
             },
+            statsByEmoji: {}, // Compteur de captures par emoji d'espèce
             hats: {
                 unlocked: [],  // emojis de chapeaux débloqués
                 owned: [],     // emojis possédés (attrapés)
@@ -6560,11 +6942,47 @@
             }
         };
         const saved = getCookie('fishingProgress');
-        const merged = saved ? { ...def, ...saved, achievements: { ...def.achievements, ...(saved.achievements||{}) }, stats: { ...def.stats, ...(saved.stats||{}) } } : def;
+        const merged = saved ? { 
+            ...def, 
+            ...saved, 
+            achievements: { ...def.achievements, ...(saved.achievements||{}) }, 
+            stats: { ...def.stats, ...(saved.stats||{}) },
+            hats: { ...def.hats, ...(saved.hats||{}) }
+        } : def;
         return merged;
     }
     function saveProgress() {
         setCookie('fishingProgress', gameState.progress, 365);
+        // Rafraîchir le guide en temps réel si ouvert
+        try {
+            if (typeof updateGuideLists === 'function') {
+                updateGuideLists();
+            }
+        } catch(_) { /* noop */ }
+    }
+    
+    // Fonction pour synchroniser la progression avec les espèces débloquées
+    function syncProgressWithUnlocks() {
+        if (!gameState.progress) return;
+        
+        // Initialiser les statistiques de base si elles sont à 0
+        if (!gameState.progress.stats) gameState.progress.stats = {};
+        
+        // Si toutes les statistiques sont à 0 mais qu'il y a des espèces débloquées, 
+        // initialiser avec des valeurs minimales pour éviter l'affichage "0"
+        const stats = gameState.progress.stats;
+        const hasUnlockedSpecies = gameState.progress.unlockedSpecies && gameState.progress.unlockedSpecies.length > 2;
+        const allStatsZero = (stats.totalCatches || 0) === 0 && (stats.totalCasts || 0) === 0 && 
+                            (stats.cumulativeScore || 0) === 0 && (stats.cumulativeWeightKg || 0) === 0;
+        
+        if (hasUnlockedSpecies && allStatsZero) {
+            // Initialiser avec des valeurs minimales pour montrer qu'il y a eu de l'activité
+            stats.totalCatches = Math.max(stats.totalCatches || 0, 1);
+            stats.totalCasts = Math.max(stats.totalCasts || 0, 1);
+            stats.cumulativeScore = Math.max(stats.cumulativeScore || 0, 10);
+            stats.cumulativeWeightKg = Math.max(stats.cumulativeWeightKg || 0, 0.1);
+            saveProgress();
+        }
     }
     
     // Fonction pour sauvegarder l'état de la fenêtre
@@ -6746,13 +7164,39 @@
     }
 
     // Panneau Guide de pêche (livre ouvert) dans une nouvelle fenêtre
+    // Fonction pour mettre à jour les détails en temps réel
+    function updateGuideDetails() {
+        if (!gameState.guideOpen) return;
+        
+        // Mettre à jour les détails des espèces
+        if (gameState.guideTab === 'species' && gameState.selectedSpecies) {
+            showSpeciesDetails(gameState.selectedSpecies);
+        }
+        // Mettre à jour les détails des chapeaux
+        if (gameState.guideTab === 'hats' && gameState.selectedHat) {
+            showHatDetails(gameState.selectedHat);
+        }
+        // Mettre à jour les détails des achievements
+        if (gameState.guideTab === 'achievements' && gameState.selectedAchievement) {
+            showAchievementDetails(gameState.selectedAchievement);
+        }
+    }
+
     function showGuide() {
         // Supprimer un ancien guide s'il existe
         const existing = document.querySelector('.fishing-guide-window');
         if (existing) existing.remove();
         
-        const unlocked = new Set((gameState.progress?.unlockedSpecies)||[]);
-        const allTypes = GAME_CONFIG.fish.types.slice();
+        // Variables globales pour le guide (centralisées dans le cookie de progression)
+        window.guideUnlocked = new Set((gameState.progress?.unlockedSpecies)||[]);
+        window.guideAllTypes = GAME_CONFIG.fish.types.slice();
+        
+        // Initialiser les variables de sélection du guide
+        gameState.guideOpen = true;
+        gameState.guideTab = 'species';
+        gameState.selectedSpecies = null;
+        gameState.selectedHat = null;
+        gameState.selectedAchievement = null;
 
         function getHighScore() {
             const local = parseInt(localStorage.getItem('fishingHighScore') || '0');
@@ -6823,14 +7267,18 @@
                 </div>
                 
                 <!-- Onglet Patterns -->
-                <div id="content-patterns" class="guide-content" style="display: none; height: 100%;">
-                    <div style="flex: 1; padding: 20px; overflow-y: auto;">
-                        <h3 style="color: #8b4513; margin-bottom: 15px;">🧩 Patterns d'Appât (détection au curseur)</h3>
-                        <div id="patterns-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                <div id="content-patterns" class="guide-content" style="display: flex; height: 100%;">
+                    <div style="flex: 1; padding: 20px; overflow-y: auto; border-right: 2px solid #8b4513;">
+                        <h3 style="color: #8b4513; margin-bottom: 15px;">🧩 Patterns d'Appât</h3>
+                        <div id="patterns-list" style="display: flex; flex-direction: column; gap: 10px;">
                             <!-- Liste des patterns -->
                         </div>
-                        <div style="margin-top: 12px; font-size: 13px; color: #555;">
-                            Règle générale: réaliser le pattern dans un rayon de <strong>20px</strong> autour du poisson pendant <strong>3s</strong>. Si le pattern correspond au préféré de l'espèce ⇒ probabilité de morsure ≥ <strong>90%</strong>.
+                    </div>
+                    
+                    <div style="flex: 1; padding: 20px; overflow-y: auto;">
+                        <h3 style="color: #8b4513; margin-bottom: 15px;">📋 Détails du Pattern</h3>
+                        <div id="pattern-details" style="text-align: center; opacity: 1; margin-top: 80px; font-style: italic;">
+                            Sélectionne un pattern pour voir ses détails
                         </div>
                     </div>
                 </div>
@@ -6853,11 +7301,18 @@
                 </div>
                 
                 <!-- Onglet Achievements -->
-                <div id="content-achievements" class="guide-content" style="display: none; height: 100%;">
-                    <div style="flex: 1; padding: 20px; overflow-y: auto;">
+                <div id="content-achievements" class="guide-content" style="display: flex; height: 100%;">
+                    <div style="flex: 1; padding: 20px; overflow-y: auto; border-right: 2px solid #8b4513;">
                         <h3 style="color: #8b4513; margin-bottom: 15px;">🏆 Achievements</h3>
-                        <div id="achievements-list" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 100%;">
+                        <div id="achievements-list" style="display: flex; flex-direction: column; gap: 10px;">
                             <!-- Liste des achievements sera générée ici -->
+                        </div>
+                    </div>
+                    
+                    <div style="flex: 1; padding: 20px; overflow-y: auto;">
+                        <h3 style="color: #8b4513; margin-bottom: 15px;">📋 Détails de l'Achievement</h3>
+                        <div id="achievement-details" style="text-align: center; opacity: 1; margin-top: 80px; font-style: italic;">
+                            Sélectionne un achievement pour voir ses détails
                         </div>
                     </div>
                 </div>
@@ -6926,47 +7381,160 @@
         // Sauvegarder à la fermeture (handler ajouté plus bas aussi, on utilise un id différent local)
         const closeBtnForSave = document.getElementById('guide-close');
         if (closeBtnForSave) closeBtnForSave.addEventListener('click', saveGuideState, { once:true });
+        // Nettoyer le pointeur global à la fermeture pour éviter fuites
+        if (closeBtnForSave) closeBtnForSave.addEventListener('click', ()=>{ try { window.updateGuideLists = null; } catch(_){} }, { once:true });
         
         // Fonction pour obtenir les conditions de déblocage d'une espèce
         function getSpeciesUnlockInfo(emoji) {
             const stats = gameState.progress?.stats || {};
+            const fishType = window.guideAllTypes.find(f => f.emoji === emoji);
             
-            const unlockConditions = {
-                '🦐': { condition: 'Débloqué par défaut', progress: 1, current: 1, target: 1 },
-                '🐟': { condition: 'Débloqué par défaut', progress: 1, current: 1, target: 1 },
-                '🪼': { condition: 'Rester 350s en surface (cumulé)', progress: Math.min(1, (stats.surfaceHoldCumulative || 0) / 350), current: Math.round(stats.surfaceHoldCumulative || 0), target: 350 },
-                '🐠': { condition: 'Effectuer 70 lancers', progress: Math.min(1, (stats.totalCasts || 0) / 70), current: stats.totalCasts || 0, target: 70 },
-                '🐡': { condition: 'Capturer 100 poissons', progress: Math.min(1, (stats.totalCatches || 0) / 100), current: stats.totalCatches || 0, target: 100 },
-                '🦑': { condition: 'Visiter 450 fois le fond', progress: Math.min(1, (stats.deepVisits || 0) / 450), current: stats.deepVisits || 0, target: 450 },
-                '🐋': { condition: 'Poids cumulé 1000 kg', progress: Math.min(1, (stats.cumulativeWeightKg || 0) / 1000), current: Math.round(stats.cumulativeWeightKg || 0), target: 1000 },
-                '🧜‍♀️': { condition: 'Score cumulé 50000', progress: Math.min(1, (stats.cumulativeScore || 0) / 50000), current: stats.cumulativeScore || 0, target: 50000 },
-                '👾': { condition: 'Capturer 50 poissons', progress: Math.min(1, (stats.totalCatches || 0) / 50), current: stats.totalCatches || 0, target: 50 },
-                '🐊': { condition: 'Rester 120s au milieu (cumulé)', progress: Math.min(1, (stats.midHoldCumulative || 0) / 120), current: Math.round(stats.midHoldCumulative || 0), target: 120 },
-                '🐢': { condition: 'Jouer 3600s (1h)', progress: Math.min(1, (stats.totalPlayTime || 0) / 3600), current: Math.round(stats.totalPlayTime || 0), target: 3600 },
-                '🦭': { condition: 'Effectuer 200 lancers', progress: Math.min(1, (stats.totalCasts || 0) / 200), current: stats.totalCasts || 0, target: 200 },
-                '🦈': { condition: 'Casser 20 lignes', progress: Math.min(1, (stats.lineBreaks || 0) / 20), current: stats.lineBreaks || 0, target: 20 },
-                '🐬': { condition: '100 morsures', progress: Math.min(1, (stats.totalBites || 0) / 100), current: stats.totalBites || 0, target: 100 },
-                '🐉': { condition: 'Série de 200 captures', progress: Math.min(1, (stats.currentNoBreakStreak || 0) / 200), current: stats.currentNoBreakStreak || 0, target: 200 },
-                '🦞': { condition: 'Rester 300s au fond (cumulé)', progress: Math.min(1, (stats.bottomHoldCumulative || 0) / 300), current: Math.round(stats.bottomHoldCumulative || 0), target: 300 },
-                '🦀': { condition: '500 détections immobiles', progress: Math.min(1, (stats.stillDetections || 0) / 500), current: stats.stillDetections || 0, target: 500 },
-                '🧜‍♂️': { condition: '100 détections hover', progress: Math.min(1, (stats.hoverDetections || 0) / 100), current: stats.hoverDetections || 0, target: 100 },
-                '🧜': { condition: '200 détections mouvement', progress: Math.min(1, (stats.movingDetections || 0) / 200), current: stats.movingDetections || 0, target: 200 },
-                '🥾': { condition: 'Capturer 50 bottes', progress: Math.min(1, (stats.bootsCaught || 0) / 50), current: stats.bootsCaught || 0, target: 50 },
-                '🐙': { condition: 'Rester 40s au fond', progress: Math.min(1, (stats.longestBottomHold || 0) / 40), current: Math.round(stats.longestBottomHold || 0), target: 40 }
-            };
+            if (!fishType || !fishType.unlock) {
+                return { condition: 'Condition inconnue', progress: 0, current: 0, target: 1 };
+            }
             
-            return unlockConditions[emoji] || { condition: 'Condition inconnue', progress: 0, current: 0, target: 1 };
+            const unlock = fishType.unlock;
+            const unlockText = fishType.unlockText || 'Condition inconnue';
+            
+            // Calculer la progression selon le type de déblocage
+            let progress = 0;
+            let current = 0;
+            let target = unlock.value || 1;
+            
+            switch (unlock.type) {
+                case 'always':
+                    return { condition: unlockText, progress: 1, current: 1, target: 1 };
+                    
+                case 'casts_at_least':
+                    current = stats.totalCasts || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'total_catches_at_least':
+                    current = stats.totalCatches || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'cumulative_score_at_least':
+                    current = stats.cumulativeScore || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'cumulative_weight_kg_at_least':
+                    current = Math.round(stats.cumulativeWeightKg || 0);
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'surface_seconds_at_least':
+                    current = Math.round(stats.surfaceHoldCumulative || 0);
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'bottom_seconds_at_least':
+                    current = Math.round(stats.bottomHoldCumulative || 0);
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'bottom_hold_at_least':
+                    current = Math.round(stats.longestBottomHold || 0);
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'mid_seconds_at_least':
+                    current = Math.round(stats.midHoldCumulative || 0);
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'line_breaks_at_least':
+                    current = stats.lineBreaks || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'bites_at_least':
+                    current = stats.totalBites || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'best_streak_at_least':
+                    current = stats.currentNoBreakStreak || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'detections_still_at_least':
+                    current = stats.stillDetections || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'detections_hover_at_least':
+                    current = stats.hoverDetections || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'detections_moving_at_least':
+                    current = stats.movingDetections || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'boots_caught_at_least':
+                    current = stats.bootsCaught || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'unique_species_at_least': {
+                    const byEmoji = gameState.progress?.statsByEmoji || {};
+                    current = Object.keys(byEmoji).filter(e => byEmoji[e] > 0).length;
+                    progress = Math.min(1, current / target);
+                    break;
+                }
+                    
+                case 'lines_broken_at_least':
+                    current = stats.lineBreaks || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'deep_visits_at_least':
+                    current = stats.deepVisits || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'best_session_score_at_least':
+                    current = stats.bestSessionScore || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                case 'mid_visits_at_least':
+                    current = stats.midVisits || 0;
+                    progress = Math.min(1, current / target);
+                    break;
+                    
+                default:
+                    return { condition: unlockText, progress: 0, current: 0, target: 1 };
+            }
+            
+            return { condition: unlockText, progress, current, target };
         }
 
         // Fonction pour générer la liste des espèces
         function generateSpeciesList() {
             const speciesList = document.getElementById('species-list');
-            if (!speciesList) return;
+            if (!speciesList) {
+                console.error('[Guide] Element species-list non trouvé');
+                return;
+            }
             
+            if (!window.guideAllTypes || window.guideAllTypes.length === 0) {
+                console.error('[Guide] window.guideAllTypes est vide ou non défini', window.guideAllTypes);
+                speciesList.innerHTML = '<div style="color: red; padding: 20px;">Erreur: Aucune espèce chargée</div>';
+                return;
+            }
+            
+            console.log('[Guide] Génération de la liste des espèces:', window.guideAllTypes.length, 'espèces');
             speciesList.innerHTML = '';
             
-            allTypes.forEach(fishType => {
-                const isUnlocked = unlocked.has(fishType.emoji);
+            window.guideAllTypes.forEach((fishType, index) => {
+                // Vérifier si l'espèce est débloquée dans le cookie de progression
+                const isUnlocked = window.guideUnlocked.has(fishType.emoji);
+                
                 const item = document.createElement('div');
                 item.style.cssText = `
                     background: ${isUnlocked ? 'rgba(139,69,19,0.1)' : 'rgba(139,69,19,0.05)'};
@@ -6974,9 +7542,10 @@
                     border-radius: 8px;
                     padding: 15px;
                     text-align: center;
-                    cursor: ${isUnlocked ? 'pointer' : 'default'};
+                    cursor: pointer;
                     transition: all 0.2s;
                     opacity: 1;
+                    pointer-events: auto;
                 `;
                 
                 // Toujours permettre l'interaction pour voir les détails
@@ -6988,7 +7557,11 @@
                     item.style.transform = 'none'; 
                     item.style.boxShadow = '0 2px 10px rgba(44,24,16,0.08)'; 
                 });
-                item.addEventListener('click', () => showSpeciesDetails(fishType.emoji));
+                item.addEventListener('click', () => {
+                    console.log('[Guide] Clic sur espèce:', fishType.emoji, fishType.name);
+                    gameState.selectedSpecies = fishType.emoji;
+                    showSpeciesDetails(fishType.emoji);
+                });
                 
                 const shownEmoji = isUnlocked ? fishType.emoji : '❔';
                 const shownName = isUnlocked ? fishType.name : '?????';
@@ -7065,6 +7638,10 @@
                 activeContent.style.display = 'flex';
             }
 
+            // Mettre à jour les variables globales avant de générer le contenu
+            window.guideUnlocked = new Set((gameState.progress?.unlockedSpecies)||[]);
+            window.guideAllTypes = GAME_CONFIG.fish.types.slice();
+            
             // Générer le contenu de l'onglet
             if (tabName === 'species') {
                 generateSpeciesList();
@@ -7082,45 +7659,186 @@
             const container = document.getElementById('patterns-list');
             if (!container) return;
             const patterns = [
-                { key:'devant',    title:'Devant',    desc:"Rester devant la direction du poisson dans un rayon de 20px pendant 3s." },
-                { key:'derriere',  title:'Derrière',  desc:"Rester derrière le poisson dans un rayon de 20px pendant 3s." },
-                { key:'au_dessus', title:'Au‑dessus', desc:"Maintenir la souris au‑dessus du poisson (y plus petit) dans un rayon de 20px pendant 3s." },
-                { key:'au_dessous',title:'Au‑dessous',desc:"Maintenir la souris au‑dessous du poisson (y plus grand) dans un rayon de 20px pendant 3s." },
-                { key:'toucher',   title:'Toucher',   desc:"Garder le curseur directement sur le poisson (≤ 8px) pendant 3s." },
-                { key:'complete',  title:'Complete',  desc:"Avoir été au‑dessus, au‑dessous, à gauche et à droite du poisson en 3s." }
+                { key:'devant',    title:'🔵 Devant',    desc:"Rester devant la direction du poisson dans un rayon de 28px pendant au moins 1s.", icon: '⬆️', detail: "Positionnez-vous devant le poisson selon sa direction de nage. Maintenez cette position pendant au moins 1 seconde pour déclencher une morsure garantie. Nécessite de suivre le poisson si celui-ci se déplace." },
+                { key:'derriere',  title:'🔴 Derrière',  desc:"Rester derrière le poisson dans un rayon de 28px pendant au moins 1s.", icon: '⬇️', detail: "Suivez le poisson et restez derrière lui. Idéal pour les espèces qui fuient ou sont méfiantes. Maintenez votre position pendant au moins 1 seconde." },
+                { key:'au_dessus', title:'🟢 Au‑dessus', desc:"Maintenir la souris au‑dessus du poisson (y plus petit) dans un rayon de 28px pendant au moins 1s.", icon: '⬆️', detail: "Gardez votre curseur au-dessus du poisson (position Y inférieure). Certains poissons remontent pour attraper l'appât qui flotte au-dessus d'eux. Maintenez la position pendant au moins 1 seconde." },
+                { key:'au_dessous',title:'🟡 Au‑dessous',desc:"Maintenir la souris au‑dessous du poisson (y plus grand) dans un rayon de 28px pendant au moins 1s.", icon: '⬇️', detail: "Positionnez votre appât sous le poisson. Les espèces de fond, les crustacés et les créatures benthiques préfèrent ce pattern. Maintenez la position pendant au moins 1 seconde." },
+                { key:'complete',  title:'🌈 Complete',  desc:"Faire le tour complet du poisson : passer au-dessus, en-dessous, à gauche et à droite.", icon: '🔄', detail: "Effectuez un mouvement circulaire complet autour du poisson : passez au-dessus, à droite, en-dessous et à gauche. Chaque quadrant doit être maintenu au moins 250ms. Pattern complexe mais très efficace pour les espèces rares." },
+                { key:'active',    title:'⚡ Active',    desc:"Mouvements rapides et variés autour du poisson sans rester immobile.", icon: '💫', detail: "Bougez constamment votre curseur autour du poisson avec des mouvements rapides. Au moins 300 pixels de déplacement total en 3.5 secondes, avec moins de 500ms d'immobilité. Imite un appât vivant et nerveux qui attire les prédateurs actifs." },
+                { key:'deep',      title:'🌊 Deep',      desc:"Rester près du poisson en profondeur (>80% de la hauteur d'eau).", icon: '🏔️', detail: "Pattern spécial pour les grandes profondeurs. Descendez votre appât à plus de 80% de la hauteur d'eau et restez près du poisson pendant au moins 0.8 seconde. Les créatures des abysses préfèrent ce pattern." }
             ];
-            container.innerHTML = patterns.map(p => `
-                <div style="background: rgba(139,69,19,0.08); border: 2px solid #8b4513; border-radius: 8px; padding: 12px;">
-                    <div style="font-weight: 700; color:#8b4513; margin-bottom: 6px;">${p.title}</div>
-                    <div style="font-size: 13px; color:#555; line-height:1.5;">${p.desc}</div>
+            
+            container.innerHTML = patterns.map((p, idx) => `
+                <div class="pattern-item" data-pattern-key="${p.key}" style="
+                    background: white;
+                    border: 2px solid #d6c7b3;
+                    border-radius: 8px;
+                    padding: 12px 15px;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                " onmouseover="this.style.background='rgba(139,69,19,0.08)'; this.style.borderColor='#8b4513';" 
+                   onmouseout="this.style.background='white'; this.style.borderColor='#d6c7b3';">
+                    <div style="font-size: 24px;">${p.icon}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 700; color:#8b4513; font-size: 15px;">${p.title}</div>
+                    </div>
                 </div>
             `).join('');
+            
+            // Ajouter les gestionnaires d'événements
+            const patternItems = container.querySelectorAll('.pattern-item');
+            patternItems.forEach((item, idx) => {
+                item.addEventListener('click', () => {
+                    // Retirer la sélection des autres items
+                    patternItems.forEach(i => {
+                        i.style.background = 'white';
+                        i.style.borderColor = '#d6c7b3';
+                    });
+                    // Sélectionner l'item cliqué
+                    item.style.background = 'rgba(139,69,19,0.15)';
+                    item.style.borderColor = '#8b4513';
+                    
+                    // Afficher les détails
+                    showPatternDetails(patterns[idx]);
+                });
+            });
+        }
+        
+        // Fonction pour afficher les détails d'un pattern
+        function showPatternDetails(pattern) {
+            const detailsContainer = document.getElementById('pattern-details');
+            if (!detailsContainer) return;
+            
+            // Compter combien d'espèces utilisent ce pattern
+            const speciesWithPattern = window.guideAllTypes.filter(f => f.baitPattern === pattern.key);
+            
+            detailsContainer.innerHTML = `
+                <div style="text-align: left;">
+                    <div style="font-size: 48px; text-align: center; margin-bottom: 20px;">${pattern.icon}</div>
+                    <h4 style="color: #8b4513; font-size: 22px; margin-bottom: 15px; text-align: center;">${pattern.title}</h4>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 8px;">📝 Description</h5>
+                        <p style="color: #555; line-height: 1.6; margin: 0;">${pattern.desc}</p>
+                    </div>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 8px;">💡 Comment l'utiliser</h5>
+                        <p style="color: #555; line-height: 1.6; margin: 0;">${pattern.detail}</p>
+                    </div>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 10px;">🐟 Espèces concernées (${speciesWithPattern.length})</h5>
+                        ${speciesWithPattern.length > 0 ? `
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                ${speciesWithPattern.map(fish => {
+                                    const unlocked = window.guideUnlocked.has(fish.emoji);
+                                    const displayEmoji = unlocked ? fish.emoji : '❔';
+                                    const displayName = unlocked ? fish.name : '???';
+                                    return `
+                                        <div style="
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 5px;
+                                            background: white;
+                                            padding: 6px 10px;
+                                            border-radius: 6px;
+                                            border: 1px solid ${unlocked ? '#8b4513' : '#ddd'};
+                                            opacity: ${unlocked ? '1' : '0.6'};
+                                        ">
+                                            <span style="font-size: 18px;">${displayEmoji}</span>
+                                            <span style="font-size: 13px; color: #555;">${displayName}</span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        ` : `
+                            <p style="color: #888; font-style: italic; margin: 0;">Aucune espèce n'utilise ce pattern comme préféré.</p>
+                        `}
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 12px; background: rgba(255,193,7,0.1); border-left: 4px solid #ffc107; border-radius: 4px;">
+                        <p style="margin: 0; font-size: 13px; color: #666;">
+                            <strong>💡 Astuce :</strong> Si le pattern correspond au préféré de l'espèce, la probabilité de morsure atteint ≥ 90% !
+                        </p>
+                    </div>
+                </div>
+            `;
         }
 
+
         // Fonction pour mettre à jour les listes en temps réel
-        function updateGuideLists() {
-            // Mettre à jour la liste des espèces si elle est visible
-            const speciesContent = document.getElementById('content-species');
-            if (speciesContent && speciesContent.style.display !== 'none') {
-                generateSpeciesList();
-            }
-            const patternsContent = document.getElementById('content-patterns');
-            if (patternsContent && patternsContent.style.display !== 'none') {
-                generatePatternsList();
+        let updateGuideListsTimeout;
+        function updateGuideLists(immediate = false) {
+            // Fonction de mise à jour réelle
+            const doUpdate = () => {
+                // Vérifier si le guide est ouvert
+                if (!document.querySelector('.fishing-guide-window')) {
+                    return; // Guide fermé, pas de mise à jour
+                }
+                
+                // Mettre à jour les variables globales du guide depuis le cookie de progression
+                window.guideUnlocked = new Set((gameState.progress?.unlockedSpecies)||[]);
+                window.guideAllTypes = GAME_CONFIG.fish.types.slice();
+                
+                // Fonction helper pour vérifier si un élément est visible
+                const isVisible = (element) => {
+                    if (!element) return false;
+                    const style = window.getComputedStyle(element);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                };
+                
+                // Mettre à jour la liste des espèces si elle est visible
+                const speciesContent = document.getElementById('content-species');
+                if (isVisible(speciesContent)) {
+                    generateSpeciesList();
+                }
+                
+                const patternsContent = document.getElementById('content-patterns');
+                if (isVisible(patternsContent)) {
+                    generatePatternsList();
+                }
+                
+                // Mettre à jour la liste des chapeaux si elle est visible
+                const hatsContent = document.getElementById('content-hats');
+                if (isVisible(hatsContent)) {
+                    generateHatsList();
+                }
+                
+                // Mettre à jour la liste des achievements si elle est visible
+                const achievementsContent = document.getElementById('content-achievements');
+                if (isVisible(achievementsContent)) {
+                    generateAchievementsList();
+                }
+                
+                // Mettre à jour les détails en temps réel
+                updateGuideDetails();
+            };
+            
+            // Si rafraîchissement immédiat demandé, exécuter tout de suite
+            if (immediate) {
+                if (updateGuideListsTimeout) {
+                    clearTimeout(updateGuideListsTimeout);
+                    updateGuideListsTimeout = null;
+                }
+                doUpdate();
+                return;
             }
             
-            // Mettre à jour la liste des chapeaux si elle est visible
-            const hatsContent = document.getElementById('content-hats');
-            if (hatsContent && hatsContent.style.display !== 'none') {
-                generateHatsList();
+            // Sinon, throttle pour éviter les appels trop fréquents
+            if (updateGuideListsTimeout) {
+                clearTimeout(updateGuideListsTimeout);
             }
             
-            // Mettre à jour la liste des achievements si elle est visible
-            const achievementsContent = document.getElementById('content-achievements');
-            if (achievementsContent && achievementsContent.style.display !== 'none') {
-                generateAchievementsList();
-            }
+            updateGuideListsTimeout = setTimeout(() => {
+                doUpdate();
+            }, 100); // Attendre 100ms avant de mettre à jour
         }
+        // Exposer au scope global pour rafraîchissement depuis saveProgress()
+        try { window.updateGuideLists = updateGuideLists; } catch(_) { /* noop */ }
 
         // Fonction pour obtenir les informations de déblocage d'un chapeau
         function getHatUnlockInfo(hat) {
@@ -7212,11 +7930,53 @@
                     current: stats.currentNoBreakStreak || 0, 
                     target: 50 
                 },
+                'shrimp200': { 
+                    condition: 'Capturer 200 crevettes', 
+                    progress: Math.min(1, (stats.shrimpCaught || 0) / 200), 
+                    current: stats.shrimpCaught || 0, 
+                    target: 200 
+                },
                 'shrimp500': { 
                     condition: 'Capturer 500 crevettes', 
                     progress: Math.min(1, (stats.shrimpCaught || 0) / 500), 
                     current: stats.shrimpCaught || 0, 
                     target: 500 
+                },
+                'tropical100': { 
+                    condition: 'Capturer 100 poissons tropicaux', 
+                    progress: Math.min(1, (stats.tropicalCaught || 0) / 100), 
+                    current: stats.tropicalCaught || 0, 
+                    target: 100 
+                },
+                'tropical1000': { 
+                    condition: 'Capturer 1000 poissons tropicaux', 
+                    progress: Math.min(1, (stats.tropicalCaught || 0) / 1000), 
+                    current: stats.tropicalCaught || 0, 
+                    target: 1000 
+                },
+                'catches100': { 
+                    condition: 'Capturer 100 poissons', 
+                    progress: Math.min(1, (stats.totalCatches || 0) / 100), 
+                    current: stats.totalCatches || 0, 
+                    target: 100 
+                },
+                'catches300': { 
+                    condition: 'Capturer 300 poissons', 
+                    progress: Math.min(1, (stats.totalCatches || 0) / 300), 
+                    current: stats.totalCatches || 0, 
+                    target: 300 
+                },
+                'catches500': { 
+                    condition: 'Capturer 500 poissons', 
+                    progress: Math.min(1, (stats.totalCatches || 0) / 500), 
+                    current: stats.totalCatches || 0, 
+                    target: 500 
+                },
+                'catches1000': { 
+                    condition: 'Capturer 1000 poissons', 
+                    progress: Math.min(1, (stats.totalCatches || 0) / 1000), 
+                    current: stats.totalCatches || 0, 
+                    target: 1000 
                 },
                 'score100k': { 
                     condition: 'Score cumulé 100 000', 
@@ -7241,6 +8001,156 @@
                     progress: Math.min(1, (stats.squidCaught || 0) / 100), 
                     current: stats.squidCaught || 0, 
                     target: 100 
+                },
+                'jellyfish50': { 
+                    condition: 'Capturer 50 méduses', 
+                    progress: Math.min(1, (stats.jellyfishCaught || 0) / 50), 
+                    current: stats.jellyfishCaught || 0, 
+                    target: 50 
+                },
+                'dragons10': { 
+                    condition: 'Capturer 10 dragons', 
+                    progress: Math.min(1, (stats.dragonsCaught || 0) / 10), 
+                    current: stats.dragonsCaught || 0, 
+                    target: 10 
+                },
+                'breaks25': { 
+                    condition: 'Casser 25 lignes', 
+                    progress: Math.min(1, (stats.lineBreaks || 0) / 25), 
+                    current: stats.lineBreaks || 0, 
+                    target: 25 
+                },
+                'breaks50': { 
+                    condition: 'Casser 50 lignes', 
+                    progress: Math.min(1, (stats.lineBreaks || 0) / 50), 
+                    current: stats.lineBreaks || 0, 
+                    target: 50 
+                },
+                'perfect10': { 
+                    condition: 'Score parfait 10 fois', 
+                    progress: Math.min(1, (stats.perfectScores || 0) / 10), 
+                    current: stats.perfectScores || 0, 
+                    target: 10 
+                },
+                'perfect25': { 
+                    condition: 'Score parfait 25 fois', 
+                    progress: Math.min(1, (stats.perfectScores || 0) / 25), 
+                    current: stats.perfectScores || 0, 
+                    target: 25 
+                },
+                'night100': { 
+                    condition: 'Capturer 100 poissons la nuit', 
+                    progress: Math.min(1, (stats.nightCatches || 0) / 100), 
+                    current: stats.nightCatches || 0, 
+                    target: 100 
+                },
+                'still500': { 
+                    condition: 'Détecter 500 patterns still', 
+                    progress: Math.min(1, (stats.stillDetections || 0) / 500), 
+                    current: stats.stillDetections || 0, 
+                    target: 500 
+                },
+                'day1000': { 
+                    condition: 'Jouer 1000s en plein jour', 
+                    progress: Math.min(1, (stats.dayPlayTime || 0) / 1000), 
+                    current: Math.round(stats.dayPlayTime || 0), 
+                    target: 1000 
+                },
+                'mermen50': { 
+                    condition: 'Capturer 50 sirènes mâles', 
+                    progress: Math.min(1, (stats.mermenCaught || 0) / 50), 
+                    current: stats.mermenCaught || 0, 
+                    target: 50 
+                },
+                'tension1000': { 
+                    condition: 'Survivre 1000s avec tension >80%', 
+                    progress: Math.min(1, (stats.highTensionTime || 0) / 1000), 
+                    current: Math.round(stats.highTensionTime || 0), 
+                    target: 1000 
+                },
+                'stamina250': { 
+                    condition: 'Capturer 250 poissons (stamina > 0)', 
+                    progress: Math.min(1, (stats.staminaAliveCatches || 0) / 250), 
+                    current: stats.staminaAliveCatches || 0, 
+                    target: 250 
+                },
+                'allHats': { 
+                    condition: 'Débloquer tous les autres chapeaux', 
+                    progress: 0, // Calculé dynamiquement
+                    current: 0, 
+                    target: 1 
+                },
+                'random200': { 
+                    condition: 'Capturer 200 poissons aléatoirement', 
+                    progress: Math.min(1, (stats.randomCatches || 0) / 200), 
+                    current: stats.randomCatches || 0, 
+                    target: 200 
+                },
+                'game100': { 
+                    condition: 'Capturer 100 poissons en 1 partie', 
+                    progress: Math.min(1, (stats.maxGameCatches || 0) / 100), 
+                    current: stats.maxGameCatches || 0, 
+                    target: 100 
+                },
+                'giant50': { 
+                    condition: 'Capturer 50 poissons géants', 
+                    progress: Math.min(1, (stats.giantFishCaught || 0) / 50), 
+                    current: stats.giantFishCaught || 0, 
+                    target: 50 
+                },
+                'deaths50': { 
+                    condition: 'Mourir 50 fois', 
+                    progress: Math.min(1, (stats.gameDeaths || 0) / 50), 
+                    current: stats.gameDeaths || 0, 
+                    target: 50 
+                },
+                'summer100': { 
+                    condition: 'Capturer 100 poissons en été', 
+                    progress: Math.min(1, (stats.summerCatches || 0) / 100), 
+                    current: stats.summerCatches || 0, 
+                    target: 100 
+                },
+                'summer200': { 
+                    condition: 'Capturer 200 poissons en été', 
+                    progress: Math.min(1, (stats.summerCatches || 0) / 200), 
+                    current: stats.summerCatches || 0, 
+                    target: 200 
+                },
+                'dawn200': { 
+                    condition: 'Capturer 200 poissons au lever du soleil', 
+                    progress: Math.min(1, (stats.dawnCatches || 0) / 200), 
+                    current: stats.dawnCatches || 0, 
+                    target: 200 
+                },
+                'autumn50': { 
+                    condition: 'Capturer 50 poissons en automne', 
+                    progress: Math.min(1, (stats.autumnCatches || 0) / 50), 
+                    current: stats.autumnCatches || 0, 
+                    target: 50 
+                },
+                'allSpecies': { 
+                    condition: 'Capturer 1 de chaque espèce', 
+                    progress: Math.min(1, (stats.uniqueSpeciesCaught || 0) / 21), // 21 espèces total
+                    current: stats.uniqueSpeciesCaught || 0, 
+                    target: 21 
+                },
+                'treasure50': { 
+                    condition: 'Capturer 50 trésors', 
+                    progress: Math.min(1, (stats.treasuresCaught || 0) / 50), 
+                    current: stats.treasuresCaught || 0, 
+                    target: 50 
+                },
+                'transform200': { 
+                    condition: 'Capturer 200 poissons transformés', 
+                    progress: Math.min(1, (stats.transformedCatches || 0) / 200), 
+                    current: stats.transformedCatches || 0, 
+                    target: 200 
+                },
+                'play2000': { 
+                    condition: 'Jouer 2000s', 
+                    progress: Math.min(1, (stats.totalPlayTime || 0) / 2000), 
+                    current: Math.round(stats.totalPlayTime || 0), 
+                    target: 2000 
                 }
             };
             
@@ -7258,6 +8168,7 @@
             const unlockedHats = gameState.progress?.hats?.unlocked || [];
             const ownedHats = gameState.progress?.hats?.owned || [];
             const equippedHat = gameState.progress?.hats?.equipped;
+            
             
             hats.forEach(hat => {
                 const isUnlocked = unlockedHats.includes(hat.emoji);
@@ -7286,7 +8197,10 @@
                     item.style.transform = 'none'; 
                     item.style.boxShadow = '0 2px 10px rgba(44,24,16,0.08)'; 
                 });
-                item.addEventListener('click', () => showHatDetails(hat.emoji));
+                item.addEventListener('click', () => {
+                    gameState.selectedHat = hat.emoji;
+                    showHatDetails(hat.emoji);
+                });
                 
                 const shownEmoji = isUnlocked ? hat.emoji : '❔';
                 const shownName = isUnlocked ? hat.name : '?????';
@@ -7356,8 +8270,13 @@
                     name: 'Première Capture',
                     description: 'Capturer votre premier poisson',
                     emoji: '🎣',
+                    detail: 'Félicitations ! Vous avez capturé votre tout premier poisson. C\'est le début de votre aventure de pêche !',
+                    category: 'Captures',
+                    perk: '+2% vitesse de rembobinage',
                     condition: () => (stats.totalCatches || 0) >= 1,
                     progress: () => Math.min(1, (stats.totalCatches || 0) / 1),
+                    current: () => stats.totalCatches || 0,
+                    target: 1,
                     unlocked: achievements.firstCatch || false
                 },
                 {
@@ -7365,8 +8284,13 @@
                     name: 'Débutant',
                     description: 'Capturer 10 poissons',
                     emoji: '🐟',
+                    detail: 'Vous commencez à maîtriser l\'art de la pêche ! Continuez comme ça.',
+                    category: 'Captures',
+                    perk: '+5% résistance de la ligne',
                     condition: () => (stats.totalCatches || 0) >= 10,
                     progress: () => Math.min(1, (stats.totalCatches || 0) / 10),
+                    current: () => stats.totalCatches || 0,
+                    target: 10,
                     unlocked: achievements.tenCatches || false
                 },
                 {
@@ -7374,8 +8298,13 @@
                     name: 'Pêcheur Expérimenté',
                     description: 'Capturer 50 poissons',
                     emoji: '🐠',
+                    detail: 'Vous êtes maintenant un pêcheur expérimenté ! Vous connaissez bien les techniques de base.',
+                    category: 'Captures',
+                    perk: '+3% poids des poissons',
                     condition: () => (stats.totalCatches || 0) >= 50,
                     progress: () => Math.min(1, (stats.totalCatches || 0) / 50),
+                    current: () => stats.totalCatches || 0,
+                    target: 50,
                     unlocked: achievements.fiftyCatches || false
                 },
                 {
@@ -7383,8 +8312,13 @@
                     name: 'Maître Pêcheur',
                     description: 'Capturer 100 poissons',
                     emoji: '🐋',
+                    detail: 'Vous êtes un véritable maître de la pêche ! Peu de pêcheurs atteignent ce niveau.',
+                    category: 'Captures',
+                    perk: '+10% résistance à la tension',
                     condition: () => (stats.totalCatches || 0) >= 100,
                     progress: () => Math.min(1, (stats.totalCatches || 0) / 100),
+                    current: () => stats.totalCatches || 0,
+                    target: 100,
                     unlocked: achievements.hundredCatches || false
                 },
                 {
@@ -7392,8 +8326,13 @@
                     name: 'Premier Lancer',
                     description: 'Effectuer votre premier lancer',
                     emoji: '🎯',
+                    detail: 'Votre première ligne à l\'eau ! Le voyage commence ici.',
+                    category: 'Lancers',
+                    perk: '+1% vitesse de rembobinage',
                     condition: () => (stats.totalCasts || 0) >= 1,
                     progress: () => Math.min(1, (stats.totalCasts || 0) / 1),
+                    current: () => stats.totalCasts || 0,
+                    target: 1,
                     unlocked: achievements.firstCast || false
                 },
                 {
@@ -7401,8 +8340,13 @@
                     name: 'Lanceur',
                     description: 'Effectuer 10 lancers',
                     emoji: '🎪',
+                    detail: 'Vous commencez à comprendre la mécanique du lancer. La précision vient avec la pratique !',
+                    category: 'Lancers',
+                    perk: '+3% résistance de la ligne',
                     condition: () => (stats.totalCasts || 0) >= 10,
                     progress: () => Math.min(1, (stats.totalCasts || 0) / 10),
+                    current: () => stats.totalCasts || 0,
+                    target: 10,
                     unlocked: achievements.tenCasts || false
                 },
                 {
@@ -7410,8 +8354,13 @@
                     name: 'Lanceur Expert',
                     description: 'Effectuer 100 lancers',
                     emoji: '🏹',
+                    detail: 'Votre bras est bien entraîné ! Vous pouvez maintenant lancer avec précision et puissance.',
+                    category: 'Lancers',
+                    perk: '+5% vitesse de rembobinage',
                     condition: () => (stats.totalCasts || 0) >= 100,
                     progress: () => Math.min(1, (stats.totalCasts || 0) / 100),
+                    current: () => stats.totalCasts || 0,
+                    target: 100,
                     unlocked: achievements.hundredCasts || false
                 },
                 {
@@ -7419,17 +8368,41 @@
                     name: 'Fond Marin',
                     description: 'Rester 40 secondes au fond',
                     emoji: '🌊',
+                    detail: 'Vous avez exploré les profondeurs marines et tenu bon au fond. Les créatures des profondeurs vous respectent !',
+                    category: 'Exploration',
+                    perk: '+5% poids des poissons',
                     condition: () => (stats.longestBottomHold || 0) >= 40,
                     progress: () => Math.min(1, (stats.longestBottomHold || 0) / 40),
+                    current: () => Math.round(stats.longestBottomHold || 0),
+                    target: 40,
                     unlocked: achievements.bottomHold40 || false
+                },
+                {
+                    key: 'bottomHold60',
+                    name: 'Abysses',
+                    description: 'Rester 60 secondes au fond',
+                    emoji: '🐙',
+                    detail: 'Vous avez plongé dans les abysses les plus profondes ! Les créatures légendaires des profondeurs vous reconnaissent.',
+                    category: 'Exploration',
+                    perk: '+10% poids des poissons',
+                    condition: () => (stats.longestBottomHold || 0) >= 60,
+                    progress: () => Math.min(1, (stats.longestBottomHold || 0) / 60),
+                    current: () => Math.round(stats.longestBottomHold || 0),
+                    target: 60,
+                    unlocked: achievements.bottomHold60 || false
                 },
                 {
                     key: 'highscore200',
                     name: 'Score Élevé',
                     description: 'Atteindre un score de 200',
                     emoji: '⭐',
+                    detail: 'Un excellent score ! Vous êtes parmi les meilleurs pêcheurs.',
+                    category: 'Score',
+                    perk: '+10% points',
                     condition: () => (gameState.highScore || 0) >= 200,
                     progress: () => Math.min(1, (gameState.highScore || 0) / 200),
+                    current: () => gameState.highScore || 0,
+                    target: 200,
                     unlocked: achievements.highscore200 || false
                 },
                 {
@@ -7437,8 +8410,13 @@
                     name: 'Explorateur',
                     description: 'Visiter les profondeurs',
                     emoji: '🦑',
+                    detail: 'Vous avez osé descendre dans les profondeurs ! C\'est là que se cachent les espèces les plus rares.',
+                    category: 'Exploration',
+                    perk: '+3% résistance à la tension',
                     condition: () => (stats.deepVisits || 0) >= 1,
                     progress: () => Math.min(1, (stats.deepVisits || 0) / 1),
+                    current: () => stats.deepVisits || 0,
+                    target: 1,
                     unlocked: achievements.firstDeep || false
                 },
                 {
@@ -7446,8 +8424,13 @@
                     name: 'Surface',
                     description: 'Pêcher en surface',
                     emoji: '🌅',
+                    detail: 'Vous avez passé du temps à pêcher en surface. Les poissons de surface sont rapides mais délicieux !',
+                    category: 'Exploration',
+                    perk: '+3% vitesse de rembobinage',
                     condition: () => (stats.surfaceHoldCumulative || 0) >= 10,
                     progress: () => Math.min(1, (stats.surfaceHoldCumulative || 0) / 10),
+                    current: () => Math.round(stats.surfaceHoldCumulative || 0),
+                    target: 10,
                     unlocked: achievements.firstSurface || false
                 },
                 {
@@ -7455,48 +8438,158 @@
                     name: 'Parfait',
                     description: 'Obtenir un score parfait',
                     emoji: '✨',
+                    detail: 'Performance parfaite ! Vous êtes un pêcheur d\'élite.',
+                    category: 'Score',
+                    perk: '+10% résistance ligne & +5% poids',
                     condition: () => (stats.perfectScores || 0) >= 1,
                     progress: () => Math.min(1, (stats.perfectScores || 0) / 1),
+                    current: () => stats.perfectScores || 0,
+                    target: 1,
                     unlocked: achievements.firstPerfect || false
                 }
             ];
             
-            achievementDefinitions.forEach(achievement => {
+            achievementDefinitions.forEach((achievement, idx) => {
                 const isUnlocked = achievement.unlocked || achievement.condition();
                 const progress = achievement.progress();
                 const progressPercent = Math.round(progress * 100);
                 
                 const item = document.createElement('div');
+                item.className = 'achievement-item';
+                item.dataset.achievementKey = achievement.key;
                 item.style.cssText = `
-                    background: ${isUnlocked ? 'rgba(139,69,19,0.2)' : 'rgba(139,69,19,0.1)'};
-                    border: 2px solid ${isUnlocked ? '#b8860b' : '#8b4513'};
+                    background: ${isUnlocked ? 'rgba(184,134,11,0.15)' : 'white'};
+                    border: 2px solid ${isUnlocked ? '#b8860b' : '#d6c7b3'};
                     border-radius: 8px;
-                    padding: 15px;
-                    text-align: center;
-                    transition: all 0.2s;
-                    position: relative;
-                    min-height: 180px;
+                    padding: 12px 15px;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
                     display: flex;
-                    flex-direction: column;
-                    justify-content: space-between;
-                    box-sizing: border-box;
+                    align-items: center;
+                    gap: 12px;
+                    position: relative;
                 `;
                 
                 item.innerHTML = `
-                    ${isUnlocked ? '<div style="position: absolute; top: 5px; right: 5px; background: #b8860b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold;">DÉBLOQUÉ</div>' : ''}
-                    <div style="font-size: 32px; margin-bottom: 8px;">${achievement.emoji}</div>
-                    <div style="font-weight: bold; color: #8b4513; margin-bottom: 4px;">${achievement.name}</div>
-                    <div style="font-size: 12px; color: #666; margin-bottom: 8px; line-height: 1.3;">${achievement.description}</div>
-                    <div style="background: rgba(0,0,0,0.1); border-radius: 4px; height: 8px; margin-bottom: 4px;">
-                        <div style="background: ${isUnlocked ? '#b8860b' : '#8b4513'}; height: 100%; border-radius: 4px; width: ${progressPercent}%; transition: width 0.3s;"></div>
-                    </div>
-                    <div style="font-size: 11px; color: #666;">
-                        ${progressPercent}% complété
+                    ${isUnlocked ? '<div style="position: absolute; top: 5px; right: 8px; background: #b8860b; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: bold;">✓</div>' : ''}
+                    <div style="font-size: 28px;">${achievement.emoji}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 700; color:#8b4513; font-size: 15px; margin-bottom: 3px;">${achievement.name}</div>
+                        <div style="background: rgba(0,0,0,0.1); border-radius: 3px; height: 4px; margin-bottom: 3px;">
+                            <div style="background: ${isUnlocked ? '#b8860b' : '#8b4513'}; height: 100%; border-radius: 3px; width: ${progressPercent}%; transition: width 0.3s;"></div>
+                        </div>
+                        <div style="font-size: 11px; color: #666;">${progressPercent}%</div>
                     </div>
                 `;
                 
+                item.addEventListener('mouseenter', () => {
+                    if (!isUnlocked) {
+                        item.style.background = 'rgba(139,69,19,0.08)';
+                    }
+                    item.style.borderColor = isUnlocked ? '#b8860b' : '#8b4513';
+                });
+                item.addEventListener('mouseleave', () => {
+                    item.style.background = isUnlocked ? 'rgba(184,134,11,0.15)' : 'white';
+                    item.style.borderColor = isUnlocked ? '#b8860b' : '#d6c7b3';
+                });
+                item.addEventListener('click', () => {
+                    // Retirer la sélection des autres items
+                    const allItems = achievementsList.querySelectorAll('.achievement-item');
+                    allItems.forEach(i => {
+                        const unlocked = i.style.background.includes('184,134,11');
+                        i.style.background = unlocked ? 'rgba(184,134,11,0.15)' : 'white';
+                        i.style.borderColor = unlocked ? '#b8860b' : '#d6c7b3';
+                    });
+                    // Sélectionner l'item cliqué
+                    item.style.background = isUnlocked ? 'rgba(184,134,11,0.25)' : 'rgba(139,69,19,0.15)';
+                    item.style.borderColor = '#8b4513';
+                    
+                    // Afficher les détails
+                    gameState.selectedAchievement = achievement;
+                    showAchievementDetails(achievement);
+                });
+                
                 achievementsList.appendChild(item);
             });
+        }
+        
+        // Fonction pour afficher les détails d'un achievement
+        function showAchievementDetails(achievement) {
+            const detailsContainer = document.getElementById('achievement-details');
+            if (!detailsContainer) return;
+            
+            const isUnlocked = achievement.unlocked || achievement.condition();
+            const progress = achievement.progress();
+            const progressPercent = Math.round(progress * 100);
+            const current = achievement.current();
+            const target = achievement.target;
+            
+            detailsContainer.innerHTML = `
+                <div style="text-align: left;">
+                    <div style="font-size: 64px; text-align: center; margin-bottom: 20px; ${!isUnlocked ? 'filter: grayscale(100%); opacity: 0.5;' : ''}">${achievement.emoji}</div>
+                    
+                    ${isUnlocked ? '<div style="text-align: center; background: #b8860b; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 20px;">🏆 DÉBLOQUÉ</div>' : ''}
+                    
+                    <h4 style="color: #8b4513; font-size: 24px; margin-bottom: 10px; text-align: center;">${achievement.name}</h4>
+                    
+                    <div style="text-align: center; padding: 10px; background: rgba(139,69,19,0.05); border-radius: 6px; margin-bottom: 20px;">
+                        <span style="display: inline-block; padding: 4px 12px; background: rgba(139,69,19,0.2); border-radius: 12px; font-size: 12px; font-weight: bold; color: #8b4513;">
+                            ${achievement.category}
+                        </span>
+                    </div>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 8px;">📝 Description</h5>
+                        <p style="color: #555; line-height: 1.6; margin: 0;">${achievement.description}</p>
+                    </div>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 8px;">💬 À propos</h5>
+                        <p style="color: #555; line-height: 1.6; margin: 0; font-style: italic;">${achievement.detail}</p>
+                    </div>
+                    
+                    <div style="background: linear-gradient(135deg, rgba(184,134,11,0.15), rgba(184,134,11,0.05)); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 2px solid rgba(184,134,11,0.3);">
+                        <h5 style="color: #b8860b; font-size: 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                            <span>⚡</span>
+                            <span>Bonus Permanent</span>
+                            ${isUnlocked ? '<span style="font-size: 12px; background: #10b981; color: white; padding: 2px 8px; border-radius: 12px; margin-left: auto;">ACTIF</span>' : '<span style="font-size: 12px; background: #888; color: white; padding: 2px 8px; border-radius: 12px; margin-left: auto;">VERROUILLÉ</span>'}
+                        </h5>
+                        <p style="color: ${isUnlocked ? '#8b4513' : '#888'}; font-weight: ${isUnlocked ? 'bold' : 'normal'}; font-size: 15px; line-height: 1.6; margin: 0;">
+                            ${achievement.perk || 'Aucun bonus'}
+                        </p>
+                        <p style="font-size: 12px; color: #666; margin: 8px 0 0 0; font-style: italic;">
+                            ${isUnlocked ? '✓ Ce bonus est appliqué automatiquement et de façon permanente' : 'Débloquez cet achievement pour obtenir ce bonus permanent'}
+                        </p>
+                    </div>
+                    
+                    <div style="background: rgba(139,69,19,0.05); padding: 15px; border-radius: 8px;">
+                        <h5 style="color: #8b4513; font-size: 16px; margin-bottom: 12px;">📊 Progression</h5>
+                        
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="font-size: 14px; color: #555;">Actuel :</span>
+                            <span style="font-size: 14px; font-weight: bold; color: #8b4513;">${current} / ${target}</span>
+                        </div>
+                        
+                        <div style="background: rgba(0,0,0,0.1); border-radius: 8px; height: 20px; margin-bottom: 8px; overflow: hidden;">
+                            <div style="background: linear-gradient(90deg, ${isUnlocked ? '#b8860b' : '#8b4513'}, ${isUnlocked ? '#ffd700' : '#a0522d'}); height: 100%; border-radius: 8px; width: ${progressPercent}%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold;">
+                                ${progressPercent > 10 ? progressPercent + '%' : ''}
+                            </div>
+                        </div>
+                        
+                        <div style="text-align: center; font-size: 13px; color: #666;">
+                            ${isUnlocked ? '✅ Complété à 100% !' : `${progressPercent}% complété`}
+                        </div>
+                    </div>
+                    
+                    ${!isUnlocked && progressPercent > 0 ? `
+                        <div style="margin-top: 20px; padding: 12px; background: rgba(33,150,243,0.1); border-left: 4px solid #2196f3; border-radius: 4px;">
+                            <p style="margin: 0; font-size: 13px; color: #666;">
+                                <strong>💪 Courage :</strong> Plus que ${target - current} pour débloquer cet achievement !
+                            </p>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
         }
 
         // Génère une description lisible des perks d'un chapeau
@@ -7658,12 +8751,23 @@
                 ` : ''}
                 
                 ${isUnlocked ? `
-                    <div style="margin-top: 20px; text-align: center;">
-                        <button id="equip-hat" style="background: ${isEquipped ? '#666' : (isOwned ? '#8b4513' : '#555')}; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: ${(isEquipped || !isOwned) ? 'default' : 'pointer'}; font-family: inherit;" ${!isOwned ? 'disabled' : ''}>
-                            ${isEquipped ? 'ÉQUIPÉ' : 'ÉQUIPER'}
-                        </button>
-                        ${!isOwned ? '<div style="margin-top:6px; font-size:12px; color:#9ca3af;">Attrape ce chapeau à la surface pour pouvoir l\'équiper.</div>' : ''}
+                    <div style="margin-top: 20px; text-align: center; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                        ${isOwned ? `
+                            <button id="equip-hat" style="background: ${isEquipped ? '#10b981' : '#8b4513'}; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: ${isEquipped ? 'default' : 'pointer'}; font-family: inherit; opacity: ${isEquipped ? '0.7' : '1'};" ${isEquipped ? 'disabled' : ''}>
+                                ${isEquipped ? '✓ ÉQUIPÉ' : 'ÉQUIPER'}
+                            </button>
+                            ${isEquipped ? `
+                                <button id="unequip-hat" style="background: #ef4444; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-family: inherit;">
+                                    RETIRER
+                                </button>
+                            ` : ''}
+                        ` : `
+                            <button style="background: #555; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: default; font-family: inherit;" disabled>
+                                NON POSSÉDÉ
+                            </button>
+                        `}
                     </div>
+                    ${!isOwned ? '<div style="margin-top:10px; font-size:12px; color:#9ca3af; text-align: center;">Attrape ce chapeau à la surface pour pouvoir l\'équiper.</div>' : ''}
                 ` : ''}
             `;
             
@@ -7676,8 +8780,26 @@
                         if (gameState.progress.hats) {
                             gameState.progress.hats.equipped = hat.emoji;
                             saveProgress();
-                            showHatDetails(emoji); // Rafraîchir l'affichage
+                            generateHatsList(); // Rafraîchir la liste
+                            showHatDetails(emoji); // Rafraîchir les détails
                             showToast(`Chapeau ${hat.name} équipé !`, 'success');
+                        }
+                    });
+                }
+            }
+            
+            // Gestionnaire pour le bouton de déséquipement
+            if (isUnlocked && isOwned && isEquipped) {
+                const unequipBtn = document.getElementById('unequip-hat');
+                if (unequipBtn) {
+                    unequipBtn.addEventListener('click', () => {
+                        // Retirer le chapeau
+                        if (gameState.progress.hats) {
+                            gameState.progress.hats.equipped = null;
+                            saveProgress();
+                            generateHatsList(); // Rafraîchir la liste
+                            showHatDetails(emoji); // Rafraîchir les détails
+                            showToast(`Chapeau ${hat.name} retiré`, 'info');
                         }
                     });
                 }
@@ -7686,13 +8808,22 @@
 
         // Fonction pour afficher les détails d'une espèce
         function showSpeciesDetails(emoji) {
+            console.log('[Guide] showSpeciesDetails appelée pour:', emoji);
             const detailsDiv = document.getElementById('species-details');
-            if (!detailsDiv) return;
+            if (!detailsDiv) {
+                console.error('[Guide] Element species-details non trouvé');
+                return;
+            }
             
-            const fishType = allTypes.find(f => f.emoji === emoji);
-            if (!fishType) return;
+            const fishType = window.guideAllTypes.find(f => f.emoji === emoji);
+            if (!fishType) {
+                console.error('[Guide] Espèce non trouvée:', emoji);
+                return;
+            }
+            console.log('[Guide] Espèce trouvée:', fishType.name);
             
-            const isUnlocked = unlocked.has(emoji);
+            // Vérifier si l'espèce est débloquée dans le cookie de progression
+            const isUnlocked = window.guideUnlocked.has(emoji);
             
             // Calculer les valeurs min/max pour l'affichage
             const minPoints = fishType.basePoints;
@@ -7881,6 +9012,718 @@
         
         // Générer la liste des espèces
         generateSpeciesList();
+        
+        // Rafraîchissement automatique du guide toutes les 2 secondes pour mettre à jour les barres de progression
+        const guideRefreshInterval = setInterval(() => {
+            // Vérifier si le guide est toujours ouvert
+            if (!document.querySelector('.fishing-guide-window')) {
+                clearInterval(guideRefreshInterval);
+                return;
+            }
+            
+            // Mettre à jour sans throttle (mais pas immédiat pour éviter les saccades)
+            updateGuideLists();
+        }, 2000);
+        
+        // Nettoyer l'intervalle quand le guide est fermé
+        const closeBtnForInterval = guideWindow.querySelector('#guide-close');
+        if (closeBtnForInterval) {
+            closeBtnForInterval.addEventListener('click', () => {
+                clearInterval(guideRefreshInterval);
+            }, { once: true });
+        }
+    }
+
+    // Helper: Vérifier si la progression doit être activée (timer ou mode test)
+    function isProgressionEnabled() {
+        return gameState.timerEnabled || (window.testToolsState && window.testToolsState.enableProgressionWithoutTimer);
+    }
+
+    // Fenêtre d'outils de test déplaçable
+    function showTestTools() {
+        // Supprimer une ancienne fenêtre de test si elle existe
+        const existing = document.querySelector('.fishing-test-window');
+        if (existing) {
+            existing.remove();
+            return; // Toggle: si elle existe déjà, on la ferme
+        }
+        
+        // État des options de test
+        if (!window.testToolsState) {
+            window.testToolsState = {
+                autoAttach: false,
+                unbreakableLine: false,
+                weightMultiplier: 1.0,
+                tensionMultiplier: 1.0,
+                lineResistance: 1.0,
+                autoSpawnEnabled: true,
+                enableProgressionWithoutTimer: false
+            };
+        }
+        
+        const testWindow = document.createElement('div');
+        testWindow.className = 'fishing-test-window';
+        testWindow.style.cssText = `
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            width: 320px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5), 0 0 0 2px rgba(59, 130, 246, 0.3);
+            z-index: 25000;
+            font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif;
+            color: white;
+            overflow: hidden;
+        `;
+        
+        testWindow.innerHTML = `
+            <div id="test-header" style="
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+                padding: 12px 16px; 
+                background: rgba(0,0,0,0.3); 
+                cursor: move; 
+                user-select: none;
+                border-bottom: 2px solid rgba(255,255,255,0.2);
+            ">
+                <h3 style="margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;">
+                    🔧 Outils de Test
+                </h3>
+                <button id="test-close" style="
+                    background: rgba(255,255,255,0.2); 
+                    border: none; 
+                    color: white; 
+                    font-size: 20px; 
+                    cursor: pointer; 
+                    width: 28px; 
+                    height: 28px; 
+                    border-radius: 50%; 
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center;
+                    transition: background 0.2s;
+                " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">×</button>
+            </div>
+            
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                <!-- Option 1: Attacher au poisson sous curseur -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="test-auto-attach" style="
+                            width: 20px; 
+                            height: 20px; 
+                            cursor: pointer; 
+                            accent-color: #10b981;
+                        ">
+                        <div>
+                            <div style="font-weight: bold; font-size: 14px;">🎣 Attacher au poisson</div>
+                            <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">Fixe automatiquement la ligne au poisson sous le curseur</div>
+                        </div>
+                    </label>
+                </div>
+                
+                <!-- Option 2: Ligne incassable -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="test-unbreakable" style="
+                            width: 20px; 
+                            height: 20px; 
+                            cursor: pointer; 
+                            accent-color: #10b981;
+                        ">
+                        <div>
+                            <div style="font-weight: bold; font-size: 14px;">💪 Ligne incassable</div>
+                            <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">La ligne ne peut jamais casser</div>
+                        </div>
+                    </label>
+                </div>
+                
+                <!-- Option 2.5: Progression sans chrono -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="test-enable-progression" style="
+                            width: 20px; 
+                            height: 20px; 
+                            cursor: pointer; 
+                            accent-color: #10b981;
+                        ">
+                        <div>
+                            <div style="font-weight: bold; font-size: 14px;">📈 Progression sans chrono</div>
+                            <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">Active les déblocages et achievements en mode libre</div>
+                        </div>
+                    </label>
+                </div>
+                
+                <!-- Option 3: Multiplicateur de poids -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">⚖️ Multiplicateur de poids</div>
+                    <div style="font-size: 11px; opacity: 0.8; margin-bottom: 8px;">Multiplie le poids des poissons qui apparaissent</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="range" id="test-weight-multiplier" min="0.1" max="10" step="0.1" value="1" style="
+                            flex: 1; 
+                            cursor: pointer;
+                            accent-color: #10b981;
+                        ">
+                        <span id="test-weight-value" style="
+                            font-weight: bold; 
+                            font-size: 16px; 
+                            min-width: 45px; 
+                            text-align: right;
+                        ">1.0x</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; margin-top: 4px;">
+                        <span>0.1x</span>
+                        <span>10x</span>
+                    </div>
+                </div>
+                
+                <!-- Option 4: Poids total cumulé -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">📊 Poids total cumulé</div>
+                    <div style="font-size: 11px; opacity: 0.8; margin-bottom: 8px;">Ajuste le poids total de poissons capturés (statistique)</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="range" id="test-total-weight" min="0" max="10000" step="10" value="0" style="
+                            flex: 1; 
+                            cursor: pointer;
+                            accent-color: #f59e0b;
+                        ">
+                        <span id="test-total-weight-value" style="
+                            font-weight: bold; 
+                            font-size: 16px; 
+                            min-width: 70px; 
+                            text-align: right;
+                        ">0 kg</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; margin-top: 4px;">
+                        <span>0 kg</span>
+                        <span>10000 kg</span>
+                    </div>
+                </div>
+                
+                <!-- Option 5: Multiplicateur de tension -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">⚡ Impact de la tension</div>
+                    <div style="font-size: 11px; opacity: 0.8; margin-bottom: 8px;">Multiplie la vitesse d'accumulation de tension</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="range" id="test-tension-multiplier" min="0" max="5" step="0.1" value="1" style="
+                            flex: 1; 
+                            cursor: pointer;
+                            accent-color: #ef4444;
+                        ">
+                        <span id="test-tension-value" style="
+                            font-weight: bold; 
+                            font-size: 16px; 
+                            min-width: 45px; 
+                            text-align: right;
+                        ">1.0x</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; margin-top: 4px;">
+                        <span>0x (aucune)</span>
+                        <span>5x (extrême)</span>
+                    </div>
+                </div>
+                
+                <!-- Option 5.5: Résistance de la ligne -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">🔗 Résistance de la ligne</div>
+                    <div style="font-size: 11px; opacity: 0.8; margin-bottom: 8px;">Augmente le seuil de rupture de la ligne</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="range" id="test-line-resistance" min="0.5" max="3" step="0.1" value="1" style="
+                            flex: 1; 
+                            cursor: pointer;
+                            accent-color: #3b82f6;
+                        ">
+                        <span id="test-line-resistance-value" style="
+                            font-weight: bold; 
+                            font-size: 16px; 
+                            min-width: 45px; 
+                            text-align: right;
+                        ">1.0x</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; margin-top: 4px;">
+                        <span>0.5x (fragile)</span>
+                        <span>3x (ultra résistant)</span>
+                    </div>
+                </div>
+                
+                <!-- Option 6: Gestion des spawns -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">🐠 Gestion des spawns</div>
+                    <div style="font-size: 11px; opacity: 0.8; margin-bottom: 8px;">Faire apparaître des poissons</div>
+                    
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 12px; display: block; margin-bottom: 4px;">Espèce :</label>
+                        <select id="test-spawn-species" style="
+                            width: 100%; 
+                            padding: 6px; 
+                            background: rgba(0,0,0,0.3); 
+                            color: white; 
+                            border: 1px solid rgba(255,255,255,0.2); 
+                            border-radius: 4px; 
+                            cursor: pointer;
+                            font-size: 12px;
+                        ">
+                        </select>
+                    </div>
+                    
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 12px; display: block; margin-bottom: 4px;">Quantité :</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="range" id="test-spawn-count" min="1" max="20" step="1" value="1" style="
+                                flex: 1; 
+                                cursor: pointer;
+                                accent-color: #8b5cf6;
+                            ">
+                            <span id="test-spawn-count-value" style="
+                                font-weight: bold; 
+                                font-size: 14px; 
+                                min-width: 30px; 
+                                text-align: right;
+                            ">1</span>
+                        </div>
+                    </div>
+                    
+                    <button id="test-spawn-button" style="
+                        width: 100%; 
+                        padding: 10px; 
+                        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); 
+                        color: white; 
+                        border: none; 
+                        border-radius: 6px; 
+                        font-weight: bold; 
+                        font-size: 14px; 
+                        cursor: pointer;
+                        transition: transform 0.1s, box-shadow 0.2s;
+                    " onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(139,92,246,0.4)'" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
+                        🎣 Faire spawn
+                    </button>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                        <button id="test-toggle-autospawn" style="
+                            padding: 8px; 
+                            background: rgba(34,197,94,0.2); 
+                            color: #22c55e; 
+                            border: 1px solid #22c55e; 
+                            border-radius: 6px; 
+                            font-weight: bold; 
+                            font-size: 12px; 
+                            cursor: pointer;
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='rgba(34,197,94,0.3)'" onmouseout="this.style.background='rgba(34,197,94,0.2)'">
+                            ⏸️ Pause spawn
+                        </button>
+                        
+                        <button id="test-clear-fish" style="
+                            padding: 8px; 
+                            background: rgba(239,68,68,0.2); 
+                            color: #ef4444; 
+                            border: 1px solid #ef4444; 
+                            border-radius: 6px; 
+                            font-weight: bold; 
+                            font-size: 12px; 
+                            cursor: pointer;
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='rgba(239,68,68,0.3)'" onmouseout="this.style.background='rgba(239,68,68,0.2)'">
+                            🗑️ Tout supprimer
+                        </button>
+                    </div>
+                </div>
+                
+                <div style="
+                    font-size: 11px; 
+                    opacity: 0.7; 
+                    text-align: center; 
+                    padding: 8px; 
+                    background: rgba(0,0,0,0.2); 
+                    border-radius: 6px;
+                    margin-top: 4px;
+                ">
+                    Appuyez sur <kbd style="
+                        background: rgba(255,255,255,0.2); 
+                        padding: 2px 6px; 
+                        border-radius: 3px; 
+                        font-family: monospace;
+                    ">T</kbd> pour ouvrir/fermer
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(testWindow);
+        
+        // Rendre la fenêtre déplaçable
+        const header = testWindow.querySelector('#test-header');
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
+        
+        header.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            initialX = e.clientX - testWindow.offsetLeft;
+            initialY = e.clientY - testWindow.offsetTop;
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+                currentX = e.clientX - initialX;
+                currentY = e.clientY - initialY;
+                testWindow.style.left = currentX + 'px';
+                testWindow.style.top = currentY + 'px';
+                testWindow.style.right = 'auto';
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        
+        // Gestion des événements
+        const autoAttachCheckbox = testWindow.querySelector('#test-auto-attach');
+        const unbreakableCheckbox = testWindow.querySelector('#test-unbreakable');
+        const enableProgressionCheckbox = testWindow.querySelector('#test-enable-progression');
+        const weightSlider = testWindow.querySelector('#test-weight-multiplier');
+        const weightValue = testWindow.querySelector('#test-weight-value');
+        const totalWeightSlider = testWindow.querySelector('#test-total-weight');
+        const totalWeightValue = testWindow.querySelector('#test-total-weight-value');
+        const tensionSlider = testWindow.querySelector('#test-tension-multiplier');
+        const tensionValue = testWindow.querySelector('#test-tension-value');
+        const lineResistanceSlider = testWindow.querySelector('#test-line-resistance');
+        const lineResistanceValue = testWindow.querySelector('#test-line-resistance-value');
+        const spawnSpeciesSelect = testWindow.querySelector('#test-spawn-species');
+        const spawnCountSlider = testWindow.querySelector('#test-spawn-count');
+        const spawnCountValue = testWindow.querySelector('#test-spawn-count-value');
+        const spawnButton = testWindow.querySelector('#test-spawn-button');
+        const toggleAutoSpawnBtn = testWindow.querySelector('#test-toggle-autospawn');
+        const clearFishBtn = testWindow.querySelector('#test-clear-fish');
+        const closeBtn = testWindow.querySelector('#test-close');
+        
+        // Restaurer l'état
+        if (autoAttachCheckbox) autoAttachCheckbox.checked = window.testToolsState.autoAttach;
+        if (unbreakableCheckbox) unbreakableCheckbox.checked = window.testToolsState.unbreakableLine;
+        if (enableProgressionCheckbox) enableProgressionCheckbox.checked = window.testToolsState.enableProgressionWithoutTimer;
+        if (weightSlider) weightSlider.value = window.testToolsState.weightMultiplier;
+        if (weightValue) weightValue.textContent = window.testToolsState.weightMultiplier.toFixed(1) + 'x';
+        if (tensionSlider) tensionSlider.value = window.testToolsState.tensionMultiplier;
+        if (tensionValue) tensionValue.textContent = window.testToolsState.tensionMultiplier.toFixed(1) + 'x';
+        if (lineResistanceSlider) lineResistanceSlider.value = window.testToolsState.lineResistance;
+        if (lineResistanceValue) lineResistanceValue.textContent = window.testToolsState.lineResistance.toFixed(1) + 'x';
+        
+        // Initialiser le slider de poids total avec la valeur actuelle
+        const currentTotalWeight = (gameState.progress?.stats?.cumulativeWeightKg || 0);
+        if (totalWeightSlider) totalWeightSlider.value = currentTotalWeight;
+        if (totalWeightValue) totalWeightValue.textContent = currentTotalWeight.toFixed(0) + ' kg';
+        
+        // Peupler le select des espèces
+        if (spawnSpeciesSelect && GAME_CONFIG.fish && GAME_CONFIG.fish.types) {
+            GAME_CONFIG.fish.types.forEach(fishType => {
+                const option = document.createElement('option');
+                option.value = fishType.emoji;
+                option.textContent = `${fishType.emoji} ${fishType.name}`;
+                spawnSpeciesSelect.appendChild(option);
+            });
+        }
+        
+        // Initialiser le compteur de spawn
+        if (spawnCountValue) spawnCountValue.textContent = '1';
+        
+        // Initialiser le bouton de toggle auto-spawn
+        if (toggleAutoSpawnBtn) {
+            const updateAutoSpawnButton = () => {
+                if (window.testToolsState.autoSpawnEnabled) {
+                    toggleAutoSpawnBtn.textContent = '⏸️ Pause spawn';
+                    toggleAutoSpawnBtn.style.background = 'rgba(34,197,94,0.2)';
+                    toggleAutoSpawnBtn.style.color = '#22c55e';
+                    toggleAutoSpawnBtn.style.borderColor = '#22c55e';
+                } else {
+                    toggleAutoSpawnBtn.textContent = '▶️ Activer spawn';
+                    toggleAutoSpawnBtn.style.background = 'rgba(251,146,60,0.2)';
+                    toggleAutoSpawnBtn.style.color = '#fb923c';
+                    toggleAutoSpawnBtn.style.borderColor = '#fb923c';
+                }
+            };
+            updateAutoSpawnButton();
+        }
+        
+        // Option 1: Attacher au poisson
+        if (autoAttachCheckbox) {
+            autoAttachCheckbox.addEventListener('change', (e) => {
+                window.testToolsState.autoAttach = e.target.checked;
+                console.log('[Test] Auto-attach:', window.testToolsState.autoAttach ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+            });
+        }
+        
+        // Option 2: Ligne incassable
+        if (unbreakableCheckbox) {
+            unbreakableCheckbox.addEventListener('change', (e) => {
+                window.testToolsState.unbreakableLine = e.target.checked;
+                console.log('[Test] Ligne incassable:', window.testToolsState.unbreakableLine ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+            });
+        }
+        
+        // Option 2.5: Progression sans chrono
+        if (enableProgressionCheckbox) {
+            enableProgressionCheckbox.addEventListener('change', (e) => {
+                window.testToolsState.enableProgressionWithoutTimer = e.target.checked;
+                console.log('[Test] Progression sans chrono:', window.testToolsState.enableProgressionWithoutTimer ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+            });
+        }
+        
+        // Option 3: Multiplicateur de poids
+        if (weightSlider) {
+            weightSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                window.testToolsState.weightMultiplier = value;
+                if (weightValue) weightValue.textContent = value.toFixed(1) + 'x';
+                console.log('[Test] Multiplicateur de poids:', value.toFixed(1) + 'x');
+            });
+        }
+        
+        // Option 4: Poids total cumulé
+        if (totalWeightSlider) {
+            totalWeightSlider.addEventListener('input', (e) => {
+                const valueKg = parseFloat(e.target.value);
+                
+                // Mettre à jour la statistique
+                if (!gameState.progress) gameState.progress = { stats: {} };
+                if (!gameState.progress.stats) gameState.progress.stats = {};
+                gameState.progress.stats.cumulativeWeightKg = valueKg;
+                
+                // Mettre à jour gameState.totalWeight (en grammes)
+                gameState.totalWeight = valueKg * 1000;
+                
+                // Sauvegarder
+                saveProgress();
+                
+                // Mettre à jour l'affichage
+                if (totalWeightValue) totalWeightValue.textContent = valueKg.toFixed(0) + ' kg';
+                
+                // Mettre à jour l'affichage du poids dans le jeu
+                const weightElement = document.getElementById('fishing-weight');
+                if (weightElement) {
+                    const weight = gameState.totalWeight;
+                    if (weight >= 1000) {
+                        weightElement.textContent = `${(weight / 1000).toFixed(1)}kg`;
+                    } else {
+                        weightElement.textContent = `${Math.round(weight)}g`;
+                    }
+                }
+                
+                // Vérifier les déblocages
+                checkUnlocks();
+                
+                // Mettre à jour le guide si ouvert
+                if (typeof window.updateGuideLists === 'function') {
+                    window.updateGuideLists(true);
+                }
+                
+                console.log('[Test] Poids total défini à:', valueKg.toFixed(0) + ' kg');
+            });
+        }
+        
+        // Option 5: Multiplicateur de tension
+        if (tensionSlider) {
+            tensionSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                window.testToolsState.tensionMultiplier = value;
+                if (tensionValue) tensionValue.textContent = value.toFixed(1) + 'x';
+                console.log('[Test] Multiplicateur de tension:', value.toFixed(1) + 'x');
+            });
+        }
+        
+        // Option 5.5: Résistance de la ligne
+        if (lineResistanceSlider) {
+            lineResistanceSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                window.testToolsState.lineResistance = value;
+                if (lineResistanceValue) lineResistanceValue.textContent = value.toFixed(1) + 'x';
+                console.log('[Test] Résistance de la ligne:', value.toFixed(1) + 'x');
+            });
+        }
+        
+        // Option 6: Gestion des spawns
+        if (spawnCountSlider) {
+            spawnCountSlider.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value);
+                if (spawnCountValue) spawnCountValue.textContent = value.toString();
+            });
+        }
+        
+        if (spawnButton) {
+            spawnButton.addEventListener('click', () => {
+                const selectedEmoji = spawnSpeciesSelect ? spawnSpeciesSelect.value : null;
+                const count = spawnCountSlider ? parseInt(spawnCountSlider.value) : 1;
+                
+                if (!selectedEmoji || !GAME_CONFIG.fish || !GAME_CONFIG.fish.types) {
+                    console.error('[Test] Impossible de spawner: configuration invalide');
+                    return;
+                }
+                
+                const fishType = GAME_CONFIG.fish.types.find(f => f.emoji === selectedEmoji);
+                if (!fishType) {
+                    console.error('[Test] Espèce non trouvée:', selectedEmoji);
+                    return;
+                }
+                
+                const canvas = document.getElementById('fishing-canvas');
+                if (!canvas) {
+                    console.error('[Test] Canvas non trouvé');
+                    return;
+                }
+                
+                // Spawner les poissons
+                for (let i = 0; i < count; i++) {
+                    const waterLevel = GAME_CONFIG.water.level;
+                    const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
+                    const waterDepth = seabedY - waterLevel;
+                    
+                    // Générer des caractéristiques aléatoires
+                    let size = fishType.sizeRange[0] + Math.random() * (fishType.sizeRange[1] - fishType.sizeRange[0]);
+                    
+                    // Appliquer le multiplicateur de poids (mode test)
+                    if (window.testToolsState && window.testToolsState.weightMultiplier !== 1.0) {
+                        size *= window.testToolsState.weightMultiplier;
+                    }
+                    
+                    const baseSpeed = fishType.speedRange[0] + Math.random() * (fishType.speedRange[1] - fishType.speedRange[0]);
+                    const sizeNorm = (size - fishType.sizeRange[0]) / Math.max(1e-6, (fishType.sizeRange[1] - fishType.sizeRange[0]));
+                    const speedFactor = 1.0 - 0.4 * sizeNorm;
+                    let speed = Math.max(fishType.speedRange[0] * 0.6, Math.min(fishType.speedRange[1], baseSpeed * speedFactor));
+                    if (GAME_CONFIG.fish.globalSpeedMultiplier) {
+                        speed *= GAME_CONFIG.fish.globalSpeedMultiplier;
+                    }
+                    
+                    const stamina = fishType.staminaRange[0] + Math.random() * (fishType.staminaRange[1] - fishType.staminaRange[0]);
+                    const biteAffinity = fishType.biteAffinityRange[0] + Math.random() * (fishType.biteAffinityRange[1] - fishType.biteAffinityRange[0]);
+                    const aggression = fishType.aggressionRange[0] + Math.random() * (fishType.aggressionRange[1] - fishType.aggressionRange[0]);
+                    
+                    function computeBasePoints(ft) {
+                        const baseK = 16;
+                        const sw = Math.max(0.0001, (typeof ft.spawnWeight === 'number' ? ft.spawnWeight : 1.0));
+                        const rarityFactor = Math.min(5, 1 / sw);
+                        return Math.round(baseK * rarityFactor);
+                    }
+                    const points = Math.round(computeBasePoints(fishType) + size * fishType.pointsPerSize);
+                    
+                    // Position de spawn aléatoire dans la zone de profondeur du poisson
+                    const minDepthRatio = fishType.depthRange[0];
+                    const maxDepthRatio = fishType.depthRange[1];
+                    const randomDepthRatio = minDepthRatio + Math.random() * (maxDepthRatio - minDepthRatio);
+                    const spawnY = waterLevel + (randomDepthRatio * waterDepth);
+                    const finalSpawnY = Math.max(waterLevel + 5, Math.min(seabedY - 5, spawnY));
+                    
+                    const fish = {
+                        x: Math.random() * canvas.width,
+                        y: finalSpawnY,
+                        direction: Math.random() < 0.5 ? -1 : 1,
+                        name: fishType.name,
+                        emoji: fishType.emoji,
+                        size: size,
+                        speed: speed,
+                        points: points,
+                        stamina: stamina,
+                        maxStamina: stamina,
+                        biteAffinity: biteAffinity,
+                        aggression: aggression,
+                        flashUntil: 0,
+                        flashPhase: 0,
+                        biteAffinityBase: biteAffinity,
+                        refusedUntil: 0,
+                        baitPattern: fishType.baitPattern,
+                        angle: 0,
+                        isAttached: false,
+                        escaping: false
+                    };
+                    
+                    gameState.fish.push(fish);
+                }
+                
+                console.log(`[Test] Spawné ${count}x ${fishType.emoji} ${fishType.name}`);
+            });
+        }
+        
+        // Bouton pour activer/désactiver le spawn automatique
+        if (toggleAutoSpawnBtn) {
+            toggleAutoSpawnBtn.addEventListener('click', () => {
+                window.testToolsState.autoSpawnEnabled = !window.testToolsState.autoSpawnEnabled;
+                
+                // Mettre à jour l'apparence du bouton
+                if (window.testToolsState.autoSpawnEnabled) {
+                    toggleAutoSpawnBtn.textContent = '⏸️ Pause spawn';
+                    toggleAutoSpawnBtn.style.background = 'rgba(34,197,94,0.2)';
+                    toggleAutoSpawnBtn.style.color = '#22c55e';
+                    toggleAutoSpawnBtn.style.borderColor = '#22c55e';
+                    console.log('[Test] Spawn automatique: ACTIVÉ');
+                } else {
+                    toggleAutoSpawnBtn.textContent = '▶️ Activer spawn';
+                    toggleAutoSpawnBtn.style.background = 'rgba(251,146,60,0.2)';
+                    toggleAutoSpawnBtn.style.color = '#fb923c';
+                    toggleAutoSpawnBtn.style.borderColor = '#fb923c';
+                    console.log('[Test] Spawn automatique: DÉSACTIVÉ');
+                }
+            });
+        }
+        
+        // Bouton pour supprimer tous les poissons
+        if (clearFishBtn) {
+            clearFishBtn.addEventListener('click', () => {
+                const count = gameState.fish ? gameState.fish.length : 0;
+                gameState.fish = [];
+                gameState.attachedFish = [];
+                gameState.pendingBiteFish = null;
+                console.log(`[Test] ${count} poissons supprimés`);
+            });
+        }
+        
+        // Bouton de fermeture
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                testWindow.remove();
+            });
+        }
     }
 
     // Met à jour en continu l'angle de la canne pour une animation fluide
@@ -7904,6 +9747,68 @@
         gameState.rodAngle = (1 - lerpRate) * (gameState.rodAngle || -0.45) + lerpRate * target + sway;
     }
 
+    // Évalue une règle de déblocage du catalogue contre les statistiques courantes
+    function isUnlockedBySpec(unlockSpec, st, context) {
+        if (!unlockSpec || typeof unlockSpec !== 'object') return false;
+        switch (unlockSpec.type) {
+            case 'always':
+                return true;
+            case 'casts_at_least':
+                return (st.totalCasts || 0) >= (unlockSpec.value || 0);
+            case 'total_catches_at_least':
+                return (st.totalCatches || 0) >= (unlockSpec.value || 0);
+            case 'cumulative_score_at_least':
+                return (st.cumulativeScore || 0) >= (unlockSpec.value || 0);
+            case 'cumulative_weight_kg_at_least':
+                return (st.cumulativeWeightKg || 0) >= (unlockSpec.value || 0);
+            case 'deep_visits_at_least':
+                return (st.deepVisits || 0) >= (unlockSpec.value || 0);
+            case 'surface_seconds_at_least':
+                return (st.surfaceHoldCumulative || 0) >= (unlockSpec.value || 0);
+            case 'bottom_seconds_at_least':
+                return (st.bottomHoldCumulative || 0) >= (unlockSpec.value || 0);
+            case 'mid_seconds_at_least':
+                return (st.midHoldCumulative || 0) >= (unlockSpec.value || 0);
+            case 'line_breaks_at_least':
+                return (st.lineBreaks || 0) >= (unlockSpec.value || 0);
+            case 'bites_at_least':
+                return (st.totalBites || 0) >= (unlockSpec.value || 0);
+            case 'best_streak_at_least':
+                return (st.bestNoBreakStreak || 0) >= (unlockSpec.value || 0);
+            case 'detections_still_at_least':
+                return (st.stillDetections || 0) >= (unlockSpec.value || 0);
+            case 'detections_hover_at_least':
+                return (st.hoverDetections || 0) >= (unlockSpec.value || 0);
+            case 'bottom_hold_at_least':
+                return (st.longestBottomHold || 0) >= (unlockSpec.value || 0);
+            case 'boots_caught_at_least':
+                return (st.bootsCaught || 0) >= (unlockSpec.value || 0);
+            case 'detections_moving_at_least':
+                return (st.movingDetections || 0) >= (unlockSpec.value || 0);
+            case 'catches_species_at_least': {
+                // Optionnel: nécessite un mapping de captures par emoji dans context
+                const emoji = unlockSpec.emoji;
+                const min = unlockSpec.value || 0;
+                const byEmoji = (context && context.catchesByEmoji) || {};
+                return (byEmoji[emoji] || 0) >= min;
+            }
+            case 'unique_species_at_least': {
+                // Nombre d'espèces différentes capturées
+                const byEmoji = (context && context.catchesByEmoji) || {};
+                const uniqueCount = Object.keys(byEmoji).filter(e => byEmoji[e] > 0).length;
+                return uniqueCount >= (unlockSpec.value || 0);
+            }
+            case 'lines_broken_at_least':
+                return (st.lineBreaks || 0) >= (unlockSpec.value || 0);
+            case 'best_session_score_at_least':
+                return (st.bestSessionScore || 0) >= (unlockSpec.value || 0);
+            case 'mid_visits_at_least':
+                return (st.midVisits || 0) >= (unlockSpec.value || 0);
+            default:
+                return false;
+        }
+    }
+
     // Vérifier et appliquer les déblocages selon la progression actuelle
     function checkUnlocks() {
         if (!gameState.progress) return;
@@ -7911,46 +9816,31 @@
         const set = new Set(gameState.progress.unlockedSpecies || []);
         const st = gameState.progress.stats || {};
         
-        // Si le chrono est activé, évaluer les déblocages d'espèces/chapeaux/achievements
-        if (gameState.timerEnabled) {
-        // Règles:
-        // 🪼 Méduse: surfaceHoldCumulative >= 1050s (x3)
-        if (st.surfaceHoldCumulative >= 1050 && !set.has('🪼')) set.add('🪼');
-        // 🐠 Tropical: totalCasts >= 210 (x3)
-        if (st.totalCasts >= 210 && !set.has('🐠')) set.add('🐠');
-        // 🐡 Ballon: totalCatches >= 300 (x3)
-        if (st.totalCatches >= 300 && !set.has('🐡')) set.add('🐡');
-        // 🦑 Calmar: deepVisits >= 1350 (x3)
-        if (st.deepVisits >= 1350 && !set.has('🦑')) set.add('🦑');
-        // 🐋 Baleine: poids cumulé >= 3000 kg (x3)
-        if ((st.cumulativeWeightKg || 0) >= 3000 && !set.has('🐋')) set.add('🐋');
-        // 🧜‍♀️ Sirène: score cumulé >= 150 000 (x3)
-        if ((st.cumulativeScore || 0) >= 150000 && !set.has('🧜‍♀️')) set.add('🧜‍♀️');
-        // Nouvelles espèces
-        if ((gameState.caughtFish?.length||0) >= 50) set.add('👾');
-        if ((st.midHoldCumulative || 0) >= 120) set.add('🐊');
-        if ((st.totalPlayTime || 0) >= 3600) set.add('🐢');
-        if (st.totalCasts >= 200) set.add('🦭');
-        if ((st.lineBreaks || 0) >= 20) set.add('🦈');
-        if ((st.totalBites || 0) >= 100) set.add('🐬');
-        if ((st.bestNoBreakStreak || 0) >= 10) set.add('🐉');
-        if ((st.bottomHoldCumulative || 0) >= 300) set.add('🦞');
-        if ((st.stillDetections || 0) >= 500) set.add('🦀');
-        if ((st.hoverDetections || 0) >= 100) set.add('🧜‍♂️');
-        if ((st.movingDetections || 0) >= 200) set.add('🧜');
-        if ((st.bootsCaught || 0) >= 50) set.add('🥾');
-        // 🐙 déjà géré par bottomHold40
-        if (gameState.progress.achievements?.bottomHold40 && !set.has('🐙')) set.add('🐙');
-        
-        // Déterminer les nouveautés et afficher une notification
-        const newly = Array.from(set).filter(e => !prev.has(e));
-        if (newly.length) {
-            newly.forEach(emo => {
-                const t = GAME_CONFIG.fish.types.find(x=>x.emoji===emo);
-                showUnlockToast(emo, t?.name || 'Nouvelle espèce');
-            });
+        // Toujours évaluer les déblocages d'espèces avec 'always', même sans chrono
+        const context = { catchesByEmoji: gameState.progress?.statsByEmoji || {} };
+        for (const fishType of GAME_CONFIG.fish.types) {
+            const spec = fishType.unlock || { type: 'always' };
+            if (isUnlockedBySpec(spec, st, context)) {
+                if (!set.has(fishType.emoji)) set.add(fishType.emoji);
+            }
         }
         
+        // Conserver les déblocages via achievements ponctuels déjà existants
+        if (gameState.progress.achievements?.bottomHold40 && !set.has('🐙')) set.add('🐙');
+        if (gameState.progress.achievements?.bottomHold60 && !set.has('🦞')) set.add('🦞');
+        
+        // Déterminer les nouveautés et afficher une notification (seulement si chrono activé)
+        if (gameState.timerEnabled) {
+            const newly = Array.from(set).filter(e => !prev.has(e));
+            if (newly.length) {
+                newly.forEach(emo => {
+                    const t = GAME_CONFIG.fish.types.find(x=>x.emoji===emo);
+                    showUnlockToast(emo, t?.name || 'Nouvelle espèce');
+                });
+            }
+        }
+        
+        // Toujours sauvegarder les espèces débloquées dans le cookie
         gameState.progress.unlockedSpecies = Array.from(set);
         saveProgress();
         
@@ -7960,43 +9850,81 @@
             if (cond && !hats.unlocked.includes(emoji)) { 
                 hats.unlocked.push(emoji); 
                 showUnlockToast(emoji, 'Chapeau débloqué');
-                // Faire spawner le chapeau à la surface
-                spawnFloatingHat(emoji);
+                // Faire spawner le chapeau à la surface seulement s'il n'est pas déjà possédé
+                if (!hats.owned.includes(emoji)) {
+                    spawnFloatingHat(emoji);
+                }
             } 
         };
-        unlockIf((st.cumulativeScore||0) >= 15000, '🎩');
-        unlockIf((st.totalCasts||0) >= 900, '🎓');
-        unlockIf((st.surfaceHoldCumulative||0) >= 1800, '👒');
-        unlockIf((st.totalCatches||0) >= 600, '🐭');
-        unlockIf((st.deepVisits||0) >= 3000, '🐹');
-        unlockIf((st.cumulativeWeightKg||0) >= 6000, '🐼');
-        // Nouveaux chapeaux
-        unlockIf((st.lineBreaks||0) >= 30, '🤡');
-        unlockIf((st.sirensCaught||0) >= 150, '👹');
-        unlockIf((st.hoverDetections||0) >= 3000, '👺');
-        unlockIf((st.perfectScores||0) >= 3, '🤖');
+        
+        // Utiliser les mêmes conditions que getHatUnlockInfo
+        unlockIf((st.cumulativeScore||0) >= 5000, '🎩');
+        unlockIf((st.totalCasts||0) >= 300, '🎓');
+        unlockIf((st.surfaceHoldCumulative||0) >= 600, '👒');
+        unlockIf((st.totalCatches||0) >= 100, '🏳️‍⚧️');
+        unlockIf((st.totalCatches||0) >= 100, '🚩');
+        unlockIf((st.totalCatches||0) >= 200, '🐭');
+        unlockIf((st.totalCatches||0) >= 300, '🧢');
+        unlockIf((st.totalCatches||0) >= 300, '🪹');
+        unlockIf((st.totalCatches||0) >= 500, '❤️‍🔥');
+        unlockIf((st.totalCatches||0) >= 1000, '🗻');
+        unlockIf((st.deepVisits||0) >= 1000, '🐹');
+        unlockIf((st.cumulativeWeightKg||0) >= 2000, '🐼');
+        // Nouveaux chapeaux - conditions alignées avec getHatUnlockInfo
+        unlockIf((st.lineBreaks||0) >= 10, '🤡');
+        unlockIf((st.sirensCaught||0) >= 50, '👹');
+        unlockIf((st.hoverDetections||0) >= 1000, '👺');
+        unlockIf((st.perfectScores||0) >= 1, '🤖');
         unlockIf((st.fastCatches||0) >= 1, '💩');
-        unlockIf((st.octopusCaught||0) >= 300, '🦊');
-        unlockIf((st.whalesCaught||0) >= 60, '🐯');
-        unlockIf((st.currentNoBreakStreak||0) >= 150, '🐺');
+        unlockIf((st.octopusCaught||0) >= 100, '🦊');
+        unlockIf((st.whalesCaught||0) >= 20, '🐯');
+        unlockIf((st.currentNoBreakStreak||0) >= 50, '🐺');
+        unlockIf((st.shrimpCaught||0) >= 200, '🍭');
         unlockIf((st.shrimpCaught||0) >= 500, '🐱');
-        unlockIf((st.cumulativeScore||0) >= 300000, '🦁');
-        unlockIf((st.pufferCaught||0) >= 600, '🐷');
-        unlockIf((st.bottomHoldCumulative||0) >= 3000, '🐻‍❄️');
-        unlockIf((st.squidCaught||0) >= 300, '🐻');
-        unlockIf((st.tropicalCaught||0) >= 3000, '🐰');
+        unlockIf((st.cumulativeScore||0) >= 100000, '🦁');
+        unlockIf((st.pufferCaught||0) >= 200, '🐷');
+        unlockIf((st.bottomHoldCumulative||0) >= 1000, '🐻‍❄️');
+        unlockIf((st.squidCaught||0) >= 100, '🐻');
+        unlockIf((st.squidCaught||0) >= 100, '🍜');
+        unlockIf((st.tropicalCaught||0) >= 100, '🍍');
+        unlockIf((st.tropicalCaught||0) >= 1000, '🐰');
         unlockIf((st.jellyfishCaught||0) >= 150, '🐸');
         // Dragon: série (streak) de 200 captures sans casser
         unlockIf((st.currentNoBreakStreak||0) >= 200, '🐲');
         unlockIf((st.lineBreaks||0) >= 75, '🧨');
         unlockIf((st.perfectScores||0) >= 30, '✨');
         unlockIf((st.nightCatches||0) >= 300, '🎃');
-        unlockIf((st.stillDetections||0) >= 1500, '👓');
-        unlockIf((st.dayPlayTime||0) >= 3000, '🕶️');
-        unlockIf((st.mermenCaught||0) >= 150, '🪮');
-        unlockIf((st.totalCatches||0) >= 900, '🧢');
-        unlockIf((st.highTensionTime||0) >= 3000, '🪖');
-        unlockIf((st.staminaAliveCatches||0) >= 750, '⛑️');
+        unlockIf((st.stillDetections||0) >= 500, '👓');
+        unlockIf((st.dayPlayTime||0) >= 1000, '🕶️');
+        unlockIf((st.mermenCaught||0) >= 50, '🪮');
+        unlockIf((st.highTensionTime||0) >= 1000, '🪖');
+        unlockIf((st.staminaAliveCatches||0) >= 250, '⛑️');
+        
+        // Ajouter toutes les conditions manquantes
+        unlockIf((st.jellyfishCaught||0) >= 50, '🐸');
+        unlockIf((st.dragonsCaught||0) >= 10, '🐲');
+        unlockIf((st.lineBreaks||0) >= 25, '🧨');
+        unlockIf((st.perfectScores||0) >= 10, '✨');
+        unlockIf((st.perfectScores||0) >= 25, '💫');
+        unlockIf((st.nightCatches||0) >= 100, '🎃');
+        unlockIf((st.randomCatches||0) >= 200, '🎲');
+        unlockIf((st.maxGameCatches||0) >= 100, '🪅');
+        unlockIf((st.giantFishCaught||0) >= 50, '🗿');
+        unlockIf((st.gameDeaths||0) >= 50, '🪦');
+        unlockIf((st.summerCatches||0) >= 100, '🍉');
+        unlockIf((st.summerCatches||0) >= 200, '🔥');
+        unlockIf((st.dawnCatches||0) >= 200, '🌻');
+        unlockIf((st.autumnCatches||0) >= 50, '🥀');
+        unlockIf((st.uniqueSpeciesCaught||0) >= 21, '🏳️‍🌈');
+        unlockIf((st.treasuresCaught||0) >= 50, '🏴‍☠️');
+        unlockIf((st.transformedCatches||0) >= 200, '💬');
+        unlockIf((st.totalPlayTime||0) >= 2000, '💤');
+        unlockIf((st.lineBreaks||0) >= 50, '💢');
+        
+        // Chapeau spécial : tous les autres chapeaux débloqués
+        const totalHats = gameState.hatItems.length;
+        const unlockedCount = hats.unlocked.length;
+        unlockIf(unlockedCount >= totalHats - 1, '👑'); // -1 pour exclure la couronne elle-même
         
         // Débloquer les achievements
         const achievements = gameState.progress.achievements || {};
@@ -8017,7 +9945,6 @@
         unlockAchievement('firstDeep', (st.deepVisits || 0) >= 1, 'Explorateur');
         unlockAchievement('firstSurface', (st.surfaceHoldCumulative || 0) >= 10, 'Surface');
         unlockAchievement('firstPerfect', (st.perfectScores || 0) >= 1, 'Parfait');
-        }
         
         // Mettre à jour les listes du guide en temps réel
         if (typeof updateGuideLists === 'function') {
@@ -8034,11 +9961,21 @@
             const wrap = document.getElementById('hook-weight-slider-wrap');
             if (wrap) wrap.style.display = 'inline-flex';
         }
+        
+        // Mettre à jour la vue debug des conditions d'unlock si activée
+        if (typeof updateUnlockDebugPanel === 'function') {
+            updateUnlockDebugPanel();
+        }
     }
 
     function showUnlockToast(emoji, name) {
         const container = document.querySelector('.fishing-game-container');
         if (!container) return;
+        
+        // Déterminer le type de déblocage (espèce ou chapeau)
+        const isSpecies = GAME_CONFIG.fish.types.some(f => f.emoji === emoji);
+        const isHat = gameState.hatItems.some(h => h.emoji === emoji);
+        
         const toast = document.createElement('div');
         toast.className = 'fishing-unlock-toast';
         toast.style.cssText = `
@@ -8048,11 +9985,124 @@
             box-shadow:0 10px 30px rgba(0,0,0,.35); z-index:10010; display:flex; align-items:center; gap:10px;
             font-weight:800; letter-spacing:.3px; opacity:0; transition:opacity .2s, transform .2s; transform-origin:top center;
         `;
-        toast.innerHTML = `<span style="font-size:22px;">${emoji}</span><span>Espèce débloquée: ${name}</span>`;
+        
+        const typeLabel = isSpecies ? 'Espèce débloquée' : isHat ? 'Chapeau débloqué' : 'Débloqué';
+        toast.innerHTML = `<span style="font-size:22px;">${emoji}</span><span>${typeLabel}: ${name}</span>`;
         container.appendChild(toast);
         requestAnimationFrame(()=>{ toast.style.opacity='1'; toast.style.transform='translateX(-50%) scale(1.02)'; });
         setTimeout(()=>{ toast.style.opacity='0'; toast.style.transform='translateX(-50%) scale(0.98)'; }, 2200);
         setTimeout(()=>{ toast.remove(); }, 2600);
+        
+        // Rafraîchir le guide immédiatement si ouvert
+        if (typeof window.updateGuideLists === 'function') {
+            window.updateGuideLists(true); // true = forcer rafraîchissement immédiat
+        }
+        
+        // Si c'est une espèce, tenter de spawner immédiatement un poisson de cette espèce
+        if (isSpecies) {
+            trySpawnNewSpecies(emoji);
+        }
+        
+        // Si c'est un chapeau, le faire spawner à la surface
+        if (isHat) {
+            spawnFloatingHat(emoji);
+        }
+    }
+    
+    // Fonction pour tenter de spawner immédiatement une nouvelle espèce débloquée
+    function trySpawnNewSpecies(emoji) {
+        const canvas = document.getElementById('fishing-canvas');
+        if (!canvas || !gameState.isPlaying) return;
+        
+        const fishType = GAME_CONFIG.fish.types.find(f => f.emoji === emoji);
+        if (!fishType) return;
+        
+        // Vérifier si la profondeur actuelle permet de spawner cette espèce
+        const waterLevel = GAME_CONFIG.water.level;
+        const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
+        const waterDepth = seabedY - waterLevel;
+        
+        if (!canFishSpawnInDepth(fishType, waterDepth)) {
+            console.log(`[Spawn] ${emoji} ne peut pas spawner à cette profondeur`);
+            return;
+        }
+        
+        // Créer un poisson de cette espèce
+        const size = fishType.sizeRange[0] + Math.random() * (fishType.sizeRange[1] - fishType.sizeRange[0]);
+        const speed = fishType.speedRange[0] + Math.random() * (fishType.speedRange[1] - fishType.speedRange[0]);
+        const stamina = fishType.staminaRange[0] + Math.random() * (fishType.staminaRange[1] - fishType.staminaRange[0]);
+        
+        // Calculer la plage de profondeur valide pour cette espèce
+        const minDepth = waterLevel + waterDepth * fishType.depthRange[0];
+        const maxDepth = waterLevel + waterDepth * fishType.depthRange[1];
+        const fishY = minDepth + Math.random() * (maxDepth - minDepth);
+        
+        // Créer le poisson
+        const newFish = {
+            x: Math.random() < 0.5 ? -50 : canvas.width + 50, // Spawn hors écran
+            y: fishY,
+            vx: (Math.random() < 0.5 ? 1 : -1) * speed,
+            vy: (Math.random() - 0.5) * 0.3,
+            size: size,
+            emoji: fishType.emoji,
+            name: fishType.name,
+            speed: speed,
+            stamina: stamina,
+            maxStamina: stamina,
+            biteAffinity: fishType.biteAffinityRange[0] + Math.random() * (fishType.biteAffinityRange[1] - fishType.biteAffinityRange[0]),
+            aggression: fishType.aggressionRange[0] + Math.random() * (fishType.aggressionRange[1] - fishType.aggressionRange[0]),
+            flashDuration: (fishType.flashDuration[0] + Math.random() * (fishType.flashDuration[1] - fishType.flashDuration[0])) * 1000,
+            baitPattern: fishType.baitPattern,
+            angle: 0,
+            points: fishType.basePoints + Math.floor((size - fishType.sizeRange[0]) * fishType.pointsPerSize),
+            rarity: fishType.rarity || 'commun'
+        };
+        
+        gameState.fish.push(newFish);
+        console.log(`[Spawn] ${emoji} ${fishType.name} spawné immédiatement après déblocage`);
+    }
+
+    // Panneau debug: montre pour chaque espèce la règle d'unlock et l'état
+    function updateUnlockDebugPanel() {
+        const params = new URLSearchParams(location.search);
+        if (!params.has('unlockDebug')) return; // activer avec ?unlockDebug=1
+        const existing = document.getElementById('unlock-debug-panel');
+        let panel = existing;
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'unlock-debug-panel';
+            panel.style.cssText = 'position:absolute; right:10px; top:10px; max-height:70vh; overflow:auto; background:rgba(0,0,0,.6); color:#fff; padding:8px 10px; border-radius:8px; font:12px/1.4 system-ui; z-index:10050; width:330px;';
+            document.body.appendChild(panel);
+        }
+        const st = gameState.progress?.stats || {};
+        const context = { catchesByEmoji: gameState.progress?.statsByEmoji || {} };
+        const unlocked = new Set(gameState.progress?.unlockedSpecies || []);
+        const rows = GAME_CONFIG.fish.types.map(t => {
+            const spec = t.unlock || { type: 'always' };
+            const ok = isUnlockedBySpec(spec, st, context) || unlocked.has(t.emoji);
+            const miss = !ok ? Math.max(0, (spec.value||0) - (
+                spec.type==='casts_at_least'? (st.totalCasts||0):
+                spec.type==='total_catches_at_least'? (st.totalCatches||0):
+                spec.type==='cumulative_score_at_least'? (st.cumulativeScore||0):
+                spec.type==='cumulative_weight_kg_at_least'? (st.cumulativeWeightKg||0):
+                spec.type==='deep_visits_at_least'? (st.deepVisits||0):
+                spec.type==='surface_seconds_at_least'? (st.surfaceHoldCumulative||0):
+                spec.type==='bottom_seconds_at_least'? (st.bottomHoldCumulative||0):
+                spec.type==='mid_seconds_at_least'? (st.midHoldCumulative||0):
+                spec.type==='line_breaks_at_least'? (st.lineBreaks||0):
+                spec.type==='bites_at_least'? (st.totalBites||0):
+                spec.type==='best_streak_at_least'? (st.bestNoBreakStreak||0):
+                spec.type==='detections_still_at_least'? (st.stillDetections||0):
+                spec.type==='detections_hover_at_least'? (st.hoverDetections||0):
+                spec.type==='detections_moving_at_least'? (st.movingDetections||0): 0
+            )) : 0;
+            return `<div style="display:flex; gap:8px; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.08)">
+                <div style="width:22px; text-align:center">${t.emoji}</div>
+                <div style="flex:1 1 auto">${t.name}<div style="opacity:.7; font-size:11px">${t.unlockText||''}</div></div>
+                <div style="font-weight:700; ${ok?'color:#10b981':'color:#f59e0b'}">${ok?'OK':`- ${miss}`}</div>
+            </div>`;
+        }).join('');
+        panel.innerHTML = `<div style="font-weight:800; margin-bottom:6px;">Debug Déblocages Espèces</div>${rows}`;
     }
 
     // Affiche une notification (toast) lors du changement de saison

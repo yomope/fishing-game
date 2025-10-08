@@ -33,7 +33,9 @@ window.HAT_CATALOG = {
         { emoji:'💢', name:'Chapeau Colère', rarity:'rare', unlockText:"Casser 150 lignes", unlock:{ type:'line_breaks_at_least', value:150 }, key:'breaks50', perks:{ fishAggressionMultiplier:2.5 } },
         { emoji:'💤', name:'Chapeau Sommeil', rarity:'commun', unlockText:"Jouer 6000s", unlock:{ type:'play_seconds_at_least', value:6000 }, key:'play2000', perks:{ fishSlowMultiplier:1.5 } },
         { emoji:'💫', name:'Chapeau Étoile Filante', rarity:'légendaire', unlockText:"Score parfait 75 fois", unlock:{ type:'perfect_games_at_least', value:75 }, key:'perfect25', perks:{ mythicSpawnRate:5.0 } },
-        { emoji:'💬', name:'Chapeau Bulle', rarity:'rare', unlockText:"Capturer 600 poissons transformés", unlock:{ type:'transformed_catches_at_least', value:600 }, key:'transform200', perks:{ socialEffectiveness:1.6 } }
+        { emoji:'💬', name:'Chapeau Bulle', rarity:'rare', unlockText:"Capturer 600 poissons transformés", unlock:{ type:'transformed_catches_at_least', value:600 }, key:'transform200', perks:{ socialEffectiveness:1.6 } },
+        { emoji:'👓', name:'Lunettes', rarity:'commun', unlockText:"Détecter 500 patterns still", unlock:{ type:'pattern_detect_at_least', pattern:'still', value:500 }, key:'still500', perks:{ stillPatternEffectiveness:1.6 } },
+        { emoji:'🕶️', name:'Lunettes de Soleil', rarity:'rare', unlockText:"Jouer 1000s en plein jour", unlock:{ type:'day_play_seconds_at_least', value:1000 }, key:'day1000', perks:{ dayEffectiveness:1.4 } }
     ]
 };
 
