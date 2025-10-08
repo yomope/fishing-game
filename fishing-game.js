@@ -2625,32 +2625,157 @@
                 drawSingleFish(ctx, fish.x, fish.y, fish.size, emoji, ang);
             }
 
+            // Visualisation simple de la réalisation du pattern (hors outil quadrants)
+            // ❔ pendant le décompte autour du poisson, ‼ une fois atteint 1s cumulée
+            try {
+                const r = 45;
+                // Ne rien afficher si le poisson est au bout de la ligne
+                if (gameState.attachedFish && gameState.attachedFish.some(att => att.fish === fish)) {
+                    // Effets pattern désactivés pour les poissons accrochés
+                } else {
+                const history = gameState.cursorMovementHistory || [];
+                const nowTs = performance.now();
+                const windowMs = 3500;
+                const samples = history.filter(h => nowTs - h.ts <= windowMs);
+                if (samples.length >= 2 && (!gameState.attachedFish || gameState.attachedFish.length === 0)) {
+                    // Vérifier aussi la présence du hook et du curseur dans la grande zone (avec 200ms de grâce après ‼)
+                    const hx = gameState.hookPosition?.x ?? -9999;
+                    const hy = gameState.hookPosition?.y ?? -9999;
+                    const mx = gameState.mouseX ?? -9999;
+                    const my = gameState.mouseY ?? -9999;
+                    const spriteSize = Math.max(10, (fish.size || 20));
+                    const bigRadius = Math.max(120, Math.min(260, 120 + spriteSize * 1.8));
+                    const dHook = Math.hypot(hx - fish.x, hy - fish.y);
+                    const dCursor = Math.hypot(mx - fish.x, my - fish.y);
+                    const grace = fish._patternEligibilityUntil && performance.now() < fish._patternEligibilityUntil;
+                    if (!grace && (dHook > bigRadius || dCursor > bigRadius)) {
+                        // Ne rien afficher si l'un des deux est trop loin
+                        ctx.restore?.();
+                    } else {
+                    let spent = 0;
+                    const spriteSize2 = Math.max(10, (fish.size || 20));
+                    const nearRadius = Math.max(28, Math.min(80, 24 + spriteSize2 * 0.7));
+                    for (let i = 1; i < samples.length; i++) {
+                        const a = samples[i-1], b = samples[i];
+                        const dt = Math.max(0, b.ts - a.ts);
+                        if (dt <= 0) continue;
+                        const ddx = (b.x - fish.x); const ddy = (b.y - fish.y);
+                        const dist = Math.hypot(ddx, ddy);
+                        if (dist <= nearRadius) spent += dt;
+                    }
+                    const needed = 2000;
+                    const epsilon = 50; // tolérance pour éviter le blocage à 99%
+                    // Log progression (%), anti-spam 800ms ou variation >=5%
+                    try {
+                        const percent = Math.min(100, Math.floor((Math.min(spent, needed) / needed) * 100));
+                        const nowLog = performance.now();
+                        const lastPct = typeof fish._lastPatternProgressPct === 'number' ? fish._lastPatternProgressPct : -1;
+                        const lastTs = fish._lastPatternProgressLogTs || 0;
+                        if ((percent !== lastPct && Math.abs(percent - lastPct) >= 5) || (nowLog - lastTs > 800)) {
+                            // log pattern progress removed
+                            fish._lastPatternProgressPct = percent;
+                            fish._lastPatternProgressLogTs = nowLog;
+                        }
+                    } catch(_) {}
+                    if (spent >= needed - epsilon) {
+                        // Déclencher effets au moment de ‼️ (sans boost ni auto-ferrage)
+                        try {
+                            const nowReal = Date.now();
+                            const lastTrig = fish._lastIndicatorTriggerTs || 0;
+                            if ( nowReal - lastTrig > 600) {
+                                fish._lastIndicatorTriggerTs = nowReal;
+                                // Effet visuel
+                                spawnPatternSparkle(fish.x, fish.y, 'indicator:complete');
+                                // Fenêtre de grâce UX: garder l'éligibilité 200ms même si on sort brièvement de la grande zone
+                                fish._patternEligibilityUntil = performance.now() + 400; // grâce un peu plus longue
+                                // 1) Rush immédiat: plus long et plus intense (+ agressivité)
+                                fish._rushGuardUntil = performance.now() + 30000; // garde-fou max 30s
+                                fish.rushUntil = performance.now() + 25000; // pousser la poursuite ~25s
+                                // Agressivité 300% pendant la fenêtre pattern
+                                fish._patternAggressionUntil = Date.now() + 25000;
+                                fish._aggressionBase = fish._aggressionBase || fish.aggression || 0.5;
+                                fish.aggression = fish._aggressionBase * 3.0;
+                                // 2) Mode ferrage prolongé: étendre la fenêtre de ferrage de +10s
+                                const baseFlash = fish.flashDuration || 2000;
+                                const extra = 10000; // +10s
+                                const nowHook = Date.now();
+                                if (!gameState.pendingBiteFish && gameState.attachedFish.length === 0) {
+                                    gameState.pendingBiteFish = { fish, expiresAt: nowHook + baseFlash + extra };
+                                    // Marquer une fenêtre d'accrochage éligible au multiplicateur (*2 par défaut)
+                                    fish._patternHookWindowUntil = nowHook + baseFlash + extra;
+                                } else if (gameState.pendingBiteFish && gameState.pendingBiteFish.fish === fish) {
+                                    gameState.pendingBiteFish.expiresAt = Math.max(gameState.pendingBiteFish.expiresAt, nowHook + baseFlash + extra);
+                                    fish._patternHookWindowUntil = Math.max(fish._patternHookWindowUntil || 0, nowHook + baseFlash + extra);
+                                }
+                            }
+                        } catch (_) {}
+                        ctx.save();
+                        ctx.globalAlpha = 1;
+                        ctx.font = 'bold 18px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillStyle = '#fca5a5';
+                        ctx.fillText('‼️', fish.x, fish.y - 28);
+                        ctx.restore();
+                    } else if (spent > 0) {
+                        // Taille et opacité progressives en fonction de l'avancement du pattern
+                        const progress = Math.max(0, Math.min(1, (spent + epsilon) / needed));
+                        const sizePx = Math.round(14 + 12 * progress); // 14px → 26px
+                        const alpha = 0.6 + 0.4 * progress; // 0.6 → 1.0
+                        ctx.save();
+                        ctx.globalAlpha = alpha;
+                        ctx.font = `bold ${sizePx}px sans-serif`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillStyle = '#fef08a';
+                        ctx.fillText('❔', fish.x, fish.y - 28);
+                        ctx.restore();
+                    }
+                    }
+                }
+                }
+            } catch(_) {}
+
             // Debug visuel: quadrants et cercle de détection
             if (gameState.debugQuadrants) {
                 ctx.save();
-                ctx.globalAlpha = 0.25;
-                ctx.strokeStyle = '#f59e0b';
-                ctx.lineWidth = 1;
+                // Halo doux
+                ctx.globalAlpha = 0.14;
+                ctx.fillStyle = '#93c5fd';
                 ctx.beginPath();
-                ctx.moveTo(fish.x - 40, fish.y);
-                ctx.lineTo(fish.x + 40, fish.y);
-                ctx.moveTo(fish.x, fish.y - 40);
-                ctx.lineTo(fish.x, fish.y + 40);
-                ctx.stroke();
-                // Cercle de proximité (rayon 28)
-                ctx.globalAlpha = 0.18;
-                ctx.beginPath();
-                ctx.arc(fish.x, fish.y, 28, 0, Math.PI * 2);
-                ctx.fillStyle = '#3b82f6';
+                ctx.arc(fish.x, fish.y, 52, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Dessiner le cadran ACTIF selon la position du curseur
+                // Quadrillage croisé (plus net)
+                ctx.globalAlpha = 0.8;
+                ctx.strokeStyle = '#60a5fa';
+                ctx.lineWidth = 1.25;
+                ctx.beginPath();
+                ctx.moveTo(fish.x - 55, fish.y);
+                ctx.lineTo(fish.x + 55, fish.y);
+                ctx.moveTo(fish.x, fish.y - 55);
+                ctx.lineTo(fish.x, fish.y + 55);
+                ctx.stroke();
+
+                // Cercle de proximité (rayon variable selon la taille du sprite) + contour brillant
+                ctx.globalAlpha = 0.25;
+                ctx.beginPath();
+                const spriteSizeVis = Math.max(10, (fish.size || 20));
+                const nearVis = Math.max(28, Math.min(80, 24 + spriteSizeVis * 0.7));
+                ctx.arc(fish.x, fish.y, nearVis, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(59,130,246,0.22)';
+                ctx.fill();
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = '#2563eb';
+                ctx.lineWidth = 1.4;
+                ctx.stroke();
+
+                // Direction active selon le curseur
                 const mx = gameState.mouseX ?? 0;
                 const my = gameState.mouseY ?? 0;
                 const dx = mx - fish.x;
                 const dy = my - fish.y;
-                const r = 28;
-                // Choisir l'axe dominant (horizontal vs vertical)
+                const r = nearVis;
                 const horiz = Math.abs(dx) >= Math.abs(dy);
                 let dir = null;
                 if (horiz) {
@@ -2659,32 +2784,35 @@
                     if (dy <= -2) dir = 'up'; else if (dy >= 2) dir = 'down';
                 }
                 if (dir) {
-                    ctx.globalAlpha = 0.16;
-                    ctx.fillStyle = '#f59e0b';
+                    // Secteur mis en évidence
+                    ctx.globalAlpha = 0.2;
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.5)';
                     if (dir === 'up')      ctx.fillRect(fish.x - r, fish.y - r, r*2, r);
                     else if (dir === 'down') ctx.fillRect(fish.x - r, fish.y, r*2, r);
                     else if (dir === 'left') ctx.fillRect(fish.x - r, fish.y - r, r, r*2);
                     else if (dir === 'right')ctx.fillRect(fish.x, fish.y - r, r, r*2);
-                    // Petite flèche au centre
-                    ctx.globalAlpha = 0.9;
-                    ctx.fillStyle = '#f59e0b';
-                    ctx.font = '12px sans-serif';
+
+                    // Flèche centrale plus visible
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = 'bold 14px sans-serif';
                     const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : dir === 'left' ? '←' : '→';
-                    ctx.fillText(arrow, fish.x, fish.y - (dir==='up'?10:dir==='down'?-10:0));
+                    ctx.fillText(arrow, fish.x, fish.y - (dir==='up'?12:dir==='down'?-12:0));
                 }
 
-                // Rayon de l'hameçon (150px) autour du poisson
+                // Rayon de l'hameçon (grand rayon variable selon la taille)
                 const hx = gameState.hookPosition?.x ?? -9999;
                 const hy = gameState.hookPosition?.y ?? -9999;
                 const dh = Math.hypot(hx - fish.x, hy - fish.y);
                 ctx.globalAlpha = 0.15;
                 ctx.beginPath();
-                ctx.arc(fish.x, fish.y, 150, 0, Math.PI * 2);
-                ctx.strokeStyle = dh <= 150 ? '#ef4444' : '#22c55e'; // rouge si le hook est dans le rayon, vert sinon
+                const bigVis = Math.max(120, Math.min(260, 120 + spriteSizeVis * 1.8));
+                ctx.arc(fish.x, fish.y, bigVis, 0, Math.PI * 2);
+                ctx.strokeStyle = dh <= bigVis ? '#ef4444' : '#22c55e'; // rouge si le hook est dans le rayon, vert sinon
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
 
-                // Afficher le temps restant pour valider le pattern (estimation locale)
+                // Afficher le temps restant pour valider le pattern (pondéré par le baitPattern de l'espèce)
                 try {
                     const history = gameState.cursorMovementHistory || [];
                     const nowTs = performance.now();
@@ -2692,7 +2820,9 @@
                     const samples = history.filter(h => nowTs - h.ts <= windowMs);
                     let fx = 1, fy = 0;
                     if (typeof fish.angle === 'number') { fx = Math.cos(fish.angle); fy = Math.sin(fish.angle); }
-                    const nearRadius = 28;
+                    const estWeightKg = Math.max(0.5, (fish.size || 20) / 10);
+                    const spriteSize = Math.max(10, (fish.size || 20));
+                    const nearRadius = Math.max(28, Math.min(80, 24 + spriteSize * 0.7));
                     let msAbove = 0, msBelow = 0, msLeft = 0, msRight = 0, msFront = 0, msBack = 0;
                     for (let i = 1; i < samples.length; i++) {
                         const a = samples[i-1], b = samples[i];
@@ -2707,21 +2837,42 @@
                         if (dot >= 0) msFront += dt; else msBack += dt;
                     }
                     const needed = 1000;
+                    const epsilon = 30; // tolérance anti 99%
                     let activeType = 'unknown';
                     let spent = 0;
                     if (msFront >= msBack + 200 && msFront >= msAbove && msFront >= msBelow) { activeType = 'devant'; spent = msFront; }
                     else if (msBack >= msFront + 200 && msBack >= msAbove && msBack >= msBelow) { activeType = 'derriere'; spent = msBack; }
                     else if (msAbove >= msBelow + 200 && msAbove >= msFront && msAbove >= msBack) { activeType = 'au_dessus'; spent = msAbove; }
                     else if (msBelow >= msAbove + 200 && msBelow >= msFront && msBelow >= msBack) { activeType = 'au_dessous'; spent = msBelow; }
-                    const remaining = Math.max(0, needed - spent);
+
+                    // Pondération: ne décompter que si l'orientation active correspond au baitPattern de l'espèce
+                    const bp = fish.baitPattern || 'any';
+                    let eligible = false;
+                    if (bp === 'any' || bp === 'active' || bp === 'deep' || bp === 'complete') {
+                        eligible = true; // ces patterns ne sont pas directionnels ici
+                    } else {
+                        eligible = (activeType !== 'unknown' && activeType === bp);
+                    }
+                    if (!eligible) spent = 0;
+                    const remaining = Math.max(0, needed - (spent + epsilon));
                     ctx.save();
-                    ctx.globalAlpha = 0.95;
-                    ctx.fillStyle = remaining === 0 ? '#10b981' : '#fde68a';
-                    ctx.font = '12px sans-serif';
+                    ctx.globalAlpha = 1;
+                    const ok = remaining === 0;
+                    // pastille 
+                    const label = ok ? 'OK' : `${(remaining/1000).toFixed(1)}s`;
+                    const bg = ok ? 'rgba(16,185,129,0.85)' : 'rgba(253,230,138,0.9)';
+                    const fg = ok ? '#064e3b' : '#7c5700';
+                    const w = ctx.measureText(label).width + 10;
+                    const yLabel = fish.y - r - 10;
+                    ctx.fillStyle = bg;
+                    ctx.beginPath();
+                    ctx.roundRect ? ctx.roundRect(fish.x - w/2, yLabel - 14, w, 18, 6) : ctx.fillRect(fish.x - w/2, yLabel - 14, w, 18);
+                    ctx.fill();
+                    ctx.fillStyle = fg;
+                    ctx.font = 'bold 12px sans-serif';
                     ctx.textAlign = 'center';
-                    ctx.textBaseline = 'bottom';
-                    const label = remaining === 0 ? 'OK' : `${(remaining/1000).toFixed(1)}s`;
-                    ctx.fillText(label, fish.x, fish.y - r - 6);
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(label, fish.x, yLabel - 5);
                     ctx.restore();
 
                     // Trait rouge entre l'hameçon et le poisson si le pattern actuel correspond à son baitPattern
@@ -2737,6 +2888,41 @@
                         ctx.stroke();
                         ctx.restore();
                     }
+
+                    // Nom du pattern attendu sous le poisson
+                    try {
+                        const bp = fish.baitPattern || 'any';
+                        const bpLabelMap = {
+                            'devant': 'Pattern: Devant',
+                            'derriere': 'Pattern: Derrière',
+                            'au_dessus': 'Pattern: Au‑dessus',
+                            'au_dessous': 'Pattern: Au‑dessous',
+                            'complete': 'Pattern: Complete',
+                            'active': 'Pattern: Actif',
+                            'deep': 'Pattern: Profond',
+                            'any': 'Pattern: Any',
+                            'hover': 'Pattern: Hover',
+                            'moving': 'Pattern: Moving',
+                            'still': 'Pattern: Still',
+                            'falling': 'Pattern: Falling',
+                            'bottom': 'Pattern: Bottom'
+                        };
+                        const label = bpLabelMap[bp] || `Pattern: ${bp}`;
+                        ctx.save();
+                        ctx.globalAlpha = 0.95;
+                        ctx.font = '11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'top';
+                        const textW = ctx.measureText(label).width + 8;
+                        const px = fish.x - textW / 2;
+                        const py = fish.y + fish.size + 8;
+                        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(px, py, textW, 16, 6); ctx.fill(); }
+                        else { ctx.fillRect(px, py, textW, 16); }
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(label, fish.x, py + 3);
+                        ctx.restore();
+                    } catch(_) {}
                 } catch (e) {}
                 ctx.restore();
             }
@@ -2753,7 +2939,38 @@
             const oy = att.baseOffY;
             const x = hx + ox;
             const y = hy + oy;
-            drawSingleFish(ctx, x, y, att.fish.size, att.fish.emoji || '🐟', hookAngle);
+            // Effet visuel orange/aura et badge ×2 dès qu'un poisson est éligible au bonus pattern
+            const eligiblePatternWindow = (att.fish._patternHookWindowUntil && Date.now() <= att.fish._patternHookWindowUntil);
+            const showPatternViz = att.viaPattern || eligiblePatternWindow;
+            if (showPatternViz) {
+                ctx.save();
+                ctx.filter = 'hue-rotate(10deg) saturate(1.2) brightness(1.1)';
+                ctx.globalAlpha = 0.95;
+                drawSingleFish(ctx, x, y, att.fish.size, att.fish.emoji || '🐟', hookAngle);
+                ctx.restore();
+                // Aura persistante ✨ pendant toute la durée de la ligne en cours
+                try {
+                    const t = performance.now() * 0.004 + (att.phase || 0);
+                    const radius = Math.max(12, Math.min(28, att.fish.size * 0.6));
+                    const s = 0.7 + 0.3 * Math.sin(t * 2);
+                    const ax1 = x + Math.cos(t) * radius;
+                    const ay1 = y + Math.sin(t) * radius;
+                    const ax2 = x + Math.cos(t + Math.PI) * (radius * 0.8);
+                    const ay2 = y + Math.sin(t + Math.PI) * (radius * 0.8);
+                    ctx.save();
+                    ctx.globalAlpha = 0.85;
+                    ctx.font = `${Math.round(16 * s)}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('✨', ax1, ay1);
+                    ctx.globalAlpha = 0.7;
+                    ctx.font = `${Math.round(12 * s)}px sans-serif`;
+                    ctx.fillText('✨', ax2, ay2);
+                    ctx.restore();
+                } catch (_) {}
+            } else {
+                drawSingleFish(ctx, x, y, att.fish.size, att.fish.emoji || '🐟', hookAngle);
+            }
             // Barre de stamina au-dessus du poisson
             const s = Math.max(0, Math.min(1, (att.fish.stamina || 0) / (80 + att.fish.size * 4)));
             const barW = Math.max(24, att.fish.size * 1.5);
@@ -2772,6 +2989,25 @@
             ctx.lineWidth = 1;
             ctx.strokeRect(-barW/2, -barH/2, barW, barH);
             ctx.restore();
+
+            // Badge ×2 sous le poisson si bonus pattern actif/éligible
+            if (showPatternViz) {
+                ctx.save();
+                const label = '×2';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                const w = ctx.measureText(label).width + 12;
+                const h = 18;
+                const px = x - w/2;
+                const py = y + att.fish.size + 10;
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.95)'; // jaune/orange
+                if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(px, py, w, h, 6); ctx.fill(); }
+                else { ctx.fillRect(px, py, w, h); }
+                ctx.fillStyle = '#111827';
+                ctx.fillText(label, x, py + 2);
+                ctx.restore();
+            }
         });
     }
 
@@ -2894,6 +3130,17 @@
             if (fishType.emoji === '🦐' && perks.shrimpSpeed) {
                 speed *= perks.shrimpSpeed;
             }
+            // Calculer et mémoriser une vitesse maximale de rush issue de la plage max + modificateurs globaux
+            let maxSpeed = fishType.speedRange[1];
+            if (GAME_CONFIG.fish.globalSpeedMultiplier) {
+                maxSpeed *= GAME_CONFIG.fish.globalSpeedMultiplier;
+            }
+            if (perks.fishSpeed) {
+                maxSpeed *= perks.fishSpeed;
+            }
+            if (fishType.emoji === '🦐' && perks.shrimpSpeed) {
+                maxSpeed *= perks.shrimpSpeed;
+            }
             
             const stamina = fishType.staminaRange[0] + Math.random() * (fishType.staminaRange[1] - fishType.staminaRange[0]);
             const biteAffinity = fishType.biteAffinityRange[0] + Math.random() * (fishType.biteAffinityRange[1] - fishType.biteAffinityRange[0]);
@@ -2946,6 +3193,7 @@
                 emoji: fishType.emoji,
                 size: size,
                 speed: speed,
+                maxSpeed: maxSpeed,
                 points: points,
                 stamina: stamina,
                 maxStamina: stamina,
@@ -3092,6 +3340,26 @@
                 }
                 // Attraction / répulsion près de l'hameçon
                 if (gameState.isCasting){
+                    // Rush agressif vers l'hameçon quand un pattern vient d'être complété
+                    if (!fish.caught && fish.rushUntil && performance.now() < fish.rushUntil) {
+                        const dx = gameState.hookPosition.x - fish.x;
+                        const dy = gameState.hookPosition.y - fish.y;
+                        const d = Math.hypot(dx, dy) || 1;
+                        const ux = dx / d, uy = dy / d;
+                        // Poursuite inconditionnelle: vitesse poussée à 2× la vitesse max
+                        const rushSpeed = (fish.maxSpeed || (10 + fish.size * 0.15)) * 2;
+                        fish.x += ux * rushSpeed;
+                        fish.y += uy * rushSpeed * 0.9; // légèrement moins vertical pour fluidité
+                        // Orienter rapidement dans la direction du rush
+                        if (Math.abs(ux) > 0.05) {
+                            const targetDir = ux >= 0 ? 1 : -1;
+                            fish.direction += (targetDir - fish.direction) * 0.35;
+                        }
+                        // Empêcher de sortir de l'eau/fond
+                        const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
+                        fish.y = Math.max(GAME_CONFIG.water.level + fish.size, Math.min(seabedY - fish.size, fish.y));
+                        // Sauter les autres forces pour cette frame (le rush prime)
+                    } else {
                     const dx = gameState.hookPosition.x - fish.x;
                     const dy = gameState.hookPosition.y - fish.y;
                     const d = Math.hypot(dx, dy) || 1;
@@ -3128,6 +3396,12 @@
                             fish.direction += (targetDir - fish.direction) * 0.15; // Transition douce (15% par frame)
                         }
                     }
+                    }
+                }
+                // Booster temporaire d'agressivité lié au pattern
+                if (fish._patternAggressionUntil && Date.now() > fish._patternAggressionUntil) {
+                    if (typeof fish._aggressionBase === 'number') fish.aggression = fish._aggressionBase;
+                    fish._patternAggressionUntil = 0;
                 }
                 // Angle vers la direction du mouvement
                 const vx = fish.direction * fish.speed;
@@ -3147,6 +3421,10 @@
         // Patterns disponibles: 'devant', 'derriere', 'au_dessus', 'au_dessous', 'complete', 'active', 'deep'
         const history = gameState.cursorMovementHistory || [];
         if (!history.length) return { type: 'unknown', score: 0 };
+        // Les patterns ne sont réalisables que si aucune prise n'est en cours
+        if (gameState.attachedFish && gameState.attachedFish.length > 0) {
+            return { type: 'unknown', score: 0 };
+        }
         
         // Sélection du poisson cible
         let targetFish = targetFishOverride || (gameState.pendingBiteFish ? gameState.pendingBiteFish.fish : null);
@@ -3162,6 +3440,20 @@
         }
         if (!targetFish) return { type: 'unknown', score: 0 };
         
+        // Exiger que l'hameçon ET le curseur soient dans la grande zone autour du poisson (150px)
+        try {
+            const hx = (gameState.hookPosition?.x ?? -9999);
+            const hy = (gameState.hookPosition?.y ?? -9999);
+            const mx = (gameState.mouseX ?? -9999);
+            const my = (gameState.mouseY ?? -9999);
+            const bigRadius = 150;
+            const dHook = Math.hypot(hx - targetFish.x, hy - targetFish.y);
+            const dCursor = Math.hypot(mx - targetFish.x, my - targetFish.y);
+            if (dHook > bigRadius || dCursor > bigRadius) {
+                return { type: 'unknown', score: 0 };
+            }
+        } catch (_) {}
+
         // Historique des 3 dernières secondes (élargi si nécessaire)
         const nowTs = performance.now();
         const windowMs = 3500;
@@ -3301,7 +3593,7 @@
                 const now = performance.now();
                 const fishLabel = (targetFish && (targetFish.emoji || targetFish.name)) ? (targetFish.emoji || targetFish.name) : 'poisson';
                 if (gameState._lastPatternLogType !== detected || !gameState._lastPatternLogTs || (now - gameState._lastPatternLogTs) > 500) {
-                    console.log(`[Pattern/curseur] détecté: ${detected} près de ${fishLabel}`);
+                    // pattern detection log removed
                     gameState._lastPatternLogType = detected;
                     gameState._lastPatternLogTs = now;
                 }
@@ -3315,7 +3607,9 @@
                         try {
                             targetFish._patternBoostUntil = Date.now() + 5000;
                             targetFish._patternBoostType = detected;
-                            console.log(`[Pattern/boost] ${detected} actif sur ${(targetFish.emoji||targetFish.name||'poisson')} pendant 5s`);
+                            // pattern boost log removed
+                            // Déclencher une charge immédiate vers l'hameçon
+                            targetFish.rushUntil = performance.now() + 1200; // ~1.2s de rush
                         } catch (e) {}
                     }
                 }
@@ -3439,11 +3733,45 @@
                         saveProgress();
                     } catch (e) {}
 
-                    gameState.pendingBiteFish = {
-                        fish,
-                        expiresAt: now + flashDur
-                    };
-                    fish.flashState = 1; // activer clignotement
+                    // Si la morsure provient d'un pattern réussi, ferrer automatiquement sans condition
+                    const patternMatched = baitPattern.type && fish.baitPattern && baitPattern.type === fish.baitPattern;
+                    if (patternMatched) {
+                        const dxHook = fish.x - gameState.hookPosition.x;
+                        const dyHook = fish.y - gameState.hookPosition.y;
+                        const baseOffX = dxHook * 0.15;
+                        const baseOffY = dyHook * 0.15;
+                        fish.caught = true;
+                        fish.stamina = Math.max(1, 60 + fish.size * 4);
+                        fish.rushUntil = performance.now() + 1500;
+                        gameState.attachedFish.push({
+                            fish,
+                            offsetX: baseOffX,
+                            offsetY: baseOffY,
+                            baseOffX,
+                            baseOffY,
+                            phase: Math.random() * Math.PI * 2,
+                            viaPattern: true
+                        });
+                        createCaptureEffect(fish.x, fish.y);
+                        gameState.pendingBiteFish = null;
+                        fish.flashState = 0;
+                        // Désactiver tous les effets de pattern/rush une fois accroché
+                        fish._patternBoostUntil = 0;
+                        fish._patternBoostType = null;
+                        fish.rushUntil = 0;
+                        fish.refusedUntil = 0;
+                    } else {
+                        // Sinon, on garde la fenêtre de ferrage classique
+                        gameState.pendingBiteFish = {
+                            fish,
+                            expiresAt: now + flashDur
+                        };
+                        // Retirer les bonus pattern de TOUS les poissons dès qu'une morsure est posée
+                        if (Array.isArray(gameState.fish)) {
+                            gameState.fish.forEach(f => { f._patternBoostUntil = 0; f._patternBoostType = null; f.rushUntil = 0; });
+                        }
+                        fish.flashState = 1; // activer clignotement
+                    }
                 } else {
                     // Refus: le poisson ignore l'appât pour un court moment
                     fish.refusedUntil = now + (1000 + Math.random()*2000); // 1-3s
@@ -3464,16 +3792,16 @@
 
     // Effet visuel discret lors d'une morsure déclenchée par pattern
     function spawnPatternSparkle(x, y, info) {
-        // Une étincelle ✨ qui grossit et disparaît rapidement
+        // Une étincelle ✨ simple, petite et brève
         gameState.effects.push({
             type: 'sparkle',
             x, y,
             age: 0,
-            life: 0.9, // durée plus longue (s)
+            life: 0.9,
             size: 14 + Math.random() * 6,
             rotation: Math.random() * Math.PI * 2
         });
-        try { console.log(`[Pattern✨] Effet déclenché ${info ? '('+info+') ' : ''}à x=${Math.round(x)}, y=${Math.round(y)}`); } catch (e) {}
+        // pattern sparkle log removed
     }
 
     function updateEffects(deltaSec) {
@@ -3664,6 +3992,24 @@
                     bonusDiv.parentNode.removeChild(bonusDiv);
                 }
             }, 1500);
+        }
+    }
+
+    // Effet visuel pour le multiplicateur de capture (pattern)
+    function showCatchMultiplierEffect(mult) {
+        const timeElement = document.getElementById('fishing-time');
+        if (!timeElement) return;
+        const div = document.createElement('div');
+        div.textContent = `×${mult}`;
+        div.style.cssText = `
+            position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            font-size:34px;font-weight:bold;color:#fbbf24;
+            text-shadow:3px 3px 6px rgba(0,0,0,0.8);
+            pointer-events:none;animation:bonusFadeUp 1.5s ease-out forwards;z-index:10000;`;
+        const container = document.querySelector('.fishing-game-container');
+        if (container) {
+            container.appendChild(div);
+            setTimeout(()=>{ if (div.parentNode) div.parentNode.removeChild(div); }, 1500);
         }
     }
 
@@ -4191,6 +4537,14 @@
                 
                 gameState.attachedFish.forEach(att => { 
                     let points = att.fish.points;
+                    // Appliquer un multiplicateur de capture si accroché durant la fenêtre de pattern
+                    const eligibleUntil = att.fish._patternHookWindowUntil || 0;
+                    let catchMult = 1;
+                    if (Date.now() <= eligibleUntil) {
+                        catchMult = gameState.progress?.features?.patternCatchMultiplier || 2; // *2 par défaut
+                        points = Math.round(points * catchMult);
+                        showCatchMultiplierEffect(catchMult);
+                    }
                     
                     // Multiplicateur de points
                     if (perks.pointMultiplier) {
@@ -4216,10 +4570,12 @@
                     }
                     
                     gained += Math.round(points);
-                    fishCount++;
-                    // Ajouter l'emoji du poisson capturé
+                    fishCount += catchMult;
+                    // Ajouter l'emoji du poisson capturé (répété selon le multiplicateur)
                     if (!gameState.caughtFish) gameState.caughtFish = [];
-                    gameState.caughtFish.push(att.fish.emoji || '🐟');
+                    for (let i = 0; i < catchMult; i++) {
+                        gameState.caughtFish.push(att.fish.emoji || '🐟');
+                    }
                     // Mettre à jour le plus gros poisson capturé
                     if (!gameState.biggestCatch || att.fish.size > gameState.biggestCatch.size) {
                         const estimatedWeight = Math.max(0.1, (att.fish.size / 10)); // Poids simple ~ taille/10
@@ -4236,18 +4592,18 @@
                     
                     // Mettre à jour le compteur par emoji
                     if (!gameState.progress.statsByEmoji) gameState.progress.statsByEmoji = {};
-                    gameState.progress.statsByEmoji[emoji] = (gameState.progress.statsByEmoji[emoji] || 0) + 1;
+                    gameState.progress.statsByEmoji[emoji] = (gameState.progress.statsByEmoji[emoji] || 0) + catchMult;
                     
-                    if (emoji === '🧜‍♀️') gameState.progress.stats.sirensCaught = (gameState.progress.stats.sirensCaught || 0) + 1;
-                    if (emoji === '🐙') gameState.progress.stats.octopusCaught = (gameState.progress.stats.octopusCaught || 0) + 1;
-                    if (emoji === '🐋') gameState.progress.stats.whalesCaught = (gameState.progress.stats.whalesCaught || 0) + 1;
-                    if (emoji === '🦐') gameState.progress.stats.shrimpCaught = (gameState.progress.stats.shrimpCaught || 0) + 1;
-                    if (emoji === '🐡') gameState.progress.stats.pufferCaught = (gameState.progress.stats.pufferCaught || 0) + 1;
-                    if (emoji === '🦑') gameState.progress.stats.squidCaught = (gameState.progress.stats.squidCaught || 0) + 1;
-                    if (emoji === '🐠') gameState.progress.stats.tropicalCaught = (gameState.progress.stats.tropicalCaught || 0) + 1;
-                    if (emoji === '🪼') gameState.progress.stats.jellyfishCaught = (gameState.progress.stats.jellyfishCaught || 0) + 1;
-                    if (emoji === '🐉') gameState.progress.stats.dragonsCaught = (gameState.progress.stats.dragonsCaught || 0) + 1;
-                    if (emoji === '🧜‍♂️') gameState.progress.stats.mermenCaught = (gameState.progress.stats.mermenCaught || 0) + 1;
+                    if (emoji === '🧜‍♀️') gameState.progress.stats.sirensCaught = (gameState.progress.stats.sirensCaught || 0) + catchMult;
+                    if (emoji === '🐙') gameState.progress.stats.octopusCaught = (gameState.progress.stats.octopusCaught || 0) + catchMult;
+                    if (emoji === '🐋') gameState.progress.stats.whalesCaught = (gameState.progress.stats.whalesCaught || 0) + catchMult;
+                    if (emoji === '🦐') gameState.progress.stats.shrimpCaught = (gameState.progress.stats.shrimpCaught || 0) + catchMult;
+                    if (emoji === '🐡') gameState.progress.stats.pufferCaught = (gameState.progress.stats.pufferCaught || 0) + catchMult;
+                    if (emoji === '🦑') gameState.progress.stats.squidCaught = (gameState.progress.stats.squidCaught || 0) + catchMult;
+                    if (emoji === '🐠') gameState.progress.stats.tropicalCaught = (gameState.progress.stats.tropicalCaught || 0) + catchMult;
+                    if (emoji === '🪼') gameState.progress.stats.jellyfishCaught = (gameState.progress.stats.jellyfishCaught || 0) + catchMult;
+                    if (emoji === '🐉') gameState.progress.stats.dragonsCaught = (gameState.progress.stats.dragonsCaught || 0) + catchMult;
+                    if (emoji === '🧜‍♂️') gameState.progress.stats.mermenCaught = (gameState.progress.stats.mermenCaught || 0) + catchMult;
                     
                     // Tracking poissons géants (taille > 30)
                     if (att.fish.size > 30) {
@@ -4323,8 +4679,8 @@
                     
                 // Mettre à jour les limites max selon le poids (sans forcer la taille)
                     updateWindowSizeBasedOnWeight();
-                // Vérifier les déblocages uniquement si le chrono est activé
-                if (gameState.timerEnabled) checkUnlocks();
+                // Vérifier les déblocages à chaque frame
+                checkUnlocks();
                 // Streak sans casse seulement si timer activé
                 if (gameState.timerEnabled) {
                 gameState.progress.stats.currentNoBreakStreak = (gameState.progress.stats.currentNoBreakStreak || 0) + fishCount;
@@ -4395,7 +4751,7 @@
                 const uniqueSpecies = new Set(gameState.caughtFish || []);
                 gameState.progress.stats.uniqueSpeciesCaught = Math.max((gameState.progress.stats.uniqueSpeciesCaught || 0), uniqueSpecies.size);
                 saveProgress();
-                if (gameState.timerEnabled) checkUnlocks();
+                checkUnlocks();
                 }
                 
                 // Retirer les poissons attrapés du monde
@@ -4991,10 +5347,12 @@
         if (canvasEl) {
             const seabedY = canvasEl.height - GAME_CONFIG.seabed.height;
             const waterLevel = GAME_CONFIG.water.level;
-            const screenHeight = canvasEl.height;
+            // Hauteur d'eau utile jusqu'au sommet du fond marin
+            const waterHeightToSeabed = Math.max(1, seabedY - waterLevel);
             const depthFromSurface = gameState.hookPosition.y - waterLevel;
-            const depthRatio = Math.max(0, Math.min(1, depthFromSurface / screenHeight));
-            const atBottom = depthRatio > 0.98; // très proche du fond
+            // Ratio de profondeur correct, normalisé par la hauteur d'eau et non la hauteur d'écran
+            const depthRatio = Math.max(0, Math.min(1, depthFromSurface / waterHeightToSeabed));
+            const atBottom = depthRatio >= 0.97; // proche du fond (tolérance légère)
             const nearSurface = depthRatio < 0.15; // proche surface
             const inDeep = depthRatio > 0.8;
             const inMid = depthRatio >= 0.3 && depthRatio <= 0.7;
@@ -5005,6 +5363,7 @@
                 gameState.progress.stats.bottomHoldCumulative = (gameState.progress.stats.bottomHoldCumulative || 0) + deltaSec;
                 
                 // Déblocage Pieuvre (40s au fond)
+                const unlockedSomethingBefore = { ...gameState.progress.achievements };
                 if (!gameState.progress.achievements.bottomHold40 && gameState.progress.stats.longestBottomHold >= 40) {
                     gameState.progress.achievements.bottomHold40 = true;
                     if (!gameState.progress.unlockedSpecies.includes('🐙')) gameState.progress.unlockedSpecies.push('🐙');
@@ -5022,6 +5381,10 @@
                     if (gameState.timerEnabled) {
                         showUnlockToast('🦞', 'Homard Géant');
                     }
+                }
+                // Rafraîchir la UI guide si quelque chose a changé
+                if (gameState.guideOpen && typeof updateGuideLists === 'function') {
+                    updateGuideLists();
                 }
             } else {
                 gameState.bottomHoldSeconds = 0;
@@ -5601,7 +5964,8 @@
                                 offsetY: baseOffY, 
                                 baseOffX, 
                                 baseOffY, 
-                                phase: Math.random() * Math.PI * 2 
+                                phase: Math.random() * Math.PI * 2,
+                                viaPattern: true 
                             });
                             createCaptureEffect(closestFish.x, closestFish.y);
                             console.log('[Test] Auto-attach:', closestFish.emoji, closestFish.name, '@ position', closestFish.x.toFixed(0), closestFish.y.toFixed(0));
@@ -5630,6 +5994,10 @@
                             createCaptureEffect(fish.x, fish.y);
                             gameState.pendingBiteFish = null;
                             fish.flashState = 0;
+                            // Neutraliser effets pattern/rush après ferrage
+                            fish._patternBoostUntil = 0;
+                            fish._patternBoostType = null;
+                            fish.rushUntil = 0;
                         } else {
                             // Trop loin : le poisson refuse et s'enfuit
                             fish.refusedUntil = now + (1500 + Math.random()*2000);
@@ -5696,10 +6064,14 @@
                                 fish.caught = true;
                                 fish.stamina = Math.max(1, 60 + fish.size * 4);
                                 fish.rushUntil = performance.now() + 1500;
-                                gameState.attachedFish.push({ fish, offsetX: baseOffX, offsetY: baseOffY, baseOffX, baseOffY, phase: Math.random()*Math.PI*2 });
+                                gameState.attachedFish.push({ fish, offsetX: baseOffX, offsetY: baseOffY, baseOffX, baseOffY, phase: Math.random()*Math.PI*2, viaPattern: true });
                                 createCaptureEffect(fish.x, fish.y);
                                 gameState.pendingBiteFish = null;
                                 fish.flashState = 0;
+                            // Désactiver effets pattern/rush pour éviter un détachement inattendu
+                            fish._patternBoostUntil = 0;
+                            fish._patternBoostType = null;
+                            fish.rushUntil = 0;
                             } else {
                                 fish.refusedUntil = now + (1500 + Math.random()*2000);
                                 fish.flashState = 0;
@@ -6254,9 +6626,7 @@
                 <button id="format-json" style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.2s;">
                     🎨 Formater JSON
                 </button>
-                <button id="toggle-quadrants" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.2s;">
-                    🧭 Quadrants Patterns
-                </button>
+                <!-- Bouton Quadrants déplacé vers Outils de Test -->
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -6277,7 +6647,7 @@
         const resetWindowBtn = document.getElementById('reset-window');
         const exportBtn = document.getElementById('export-cookies');
         const importBtn = document.getElementById('import-cookies');
-        const toggleQuadrantsBtn = document.getElementById('toggle-quadrants');
+        const toggleQuadrantsBtn = null; // déplacé vers Outils de Test
         const importFile = document.getElementById('import-file');
         const closeBtn = document.getElementById('close-cookie-manager');
         const statusDiv = document.getElementById('cookie-status');
@@ -6799,12 +7169,7 @@
         });
 
         // Activer l'affichage des quadrants de détection autour des poissons
-        if (toggleQuadrantsBtn) {
-            toggleQuadrantsBtn.addEventListener('click', () => {
-                gameState.debugQuadrants = !gameState.debugQuadrants;
-                showToast(gameState.debugQuadrants ? 'Quadrants affichés' : 'Quadrants masqués', 'info');
-            });
-        }
+        // Gestion déplacée dans showTestTools()
 
         importFile.addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -7170,7 +7535,9 @@
         
         // Mettre à jour les détails des espèces
         if (gameState.guideTab === 'species' && gameState.selectedSpecies) {
-            showSpeciesDetails(gameState.selectedSpecies);
+            if (typeof window.showSpeciesDetails === 'function') {
+                window.showSpeciesDetails(gameState.selectedSpecies);
+            }
         }
         // Mettre à jour les détails des chapeaux
         if (gameState.guideTab === 'hats' && gameState.selectedHat) {
@@ -7560,7 +7927,9 @@
                 item.addEventListener('click', () => {
                     console.log('[Guide] Clic sur espèce:', fishType.emoji, fishType.name);
                     gameState.selectedSpecies = fishType.emoji;
-                    showSpeciesDetails(fishType.emoji);
+                    if (typeof window.showSpeciesDetails === 'function') {
+                        window.showSpeciesDetails(fishType.emoji);
+                    }
                 });
                 
                 const shownEmoji = isUnlocked ? fishType.emoji : '❔';
@@ -8807,7 +9176,7 @@
         }
 
         // Fonction pour afficher les détails d'une espèce
-        function showSpeciesDetails(emoji) {
+        window.showSpeciesDetails = function(emoji) {
             console.log('[Guide] showSpeciesDetails appelée pour:', emoji);
             const detailsDiv = document.getElementById('species-details');
             if (!detailsDiv) {
@@ -9108,6 +9477,26 @@
             </div>
             
             <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                <!-- Option: Affichage des quadrants -->
+                <div style="
+                    background: rgba(0,0,0,0.2); 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    border: 2px solid rgba(255,255,255,0.1);
+                ">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="test-show-quadrants" style="
+                            width: 20px; 
+                            height: 20px; 
+                            cursor: pointer; 
+                            accent-color: #f59e0b;
+                        ">
+                        <div>
+                            <div style="font-weight: bold; font-size: 14px;">🧭 Quadrants Patterns</div>
+                            <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">Affiche les zones de proximité/dir. autour des poissons</div>
+                        </div>
+                    </label>
+                </div>
                 <!-- Option 1: Attacher au poisson sous curseur -->
                 <div style="
                     background: rgba(0,0,0,0.2); 
@@ -9394,6 +9783,14 @@
         
         // Rendre la fenêtre déplaçable
         const header = testWindow.querySelector('#test-header');
+        const showQuadrantsCheckbox = testWindow.querySelector('#test-show-quadrants');
+        if (showQuadrantsCheckbox) {
+            showQuadrantsCheckbox.checked = !!gameState.debugQuadrants;
+            showQuadrantsCheckbox.addEventListener('change', (e) => {
+                gameState.debugQuadrants = !!e.target.checked;
+                showToast(gameState.debugQuadrants ? 'Quadrants affichés' : 'Quadrants masqués', 'info');
+            });
+        }
         let isDragging = false;
         let currentX;
         let currentY;

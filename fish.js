@@ -42,7 +42,7 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🐟', name: 'Poisson Commun',
-            sizeRange: [12, 16], speedRange: [1.0, 1.6], 
+            sizeRange: [12, 16], speedRange: [0.5, 1.0], 
             pointsPerSize: 1.0, basePoints: 8,
             staminaRange: [40, 60], depthRange: [0.0, 0.5],
             biteAffinityRange: [0.45, 0.65], aggressionRange: [0.5, 0.7],
