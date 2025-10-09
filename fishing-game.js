@@ -285,6 +285,29 @@
         lineSnapped: false, // true quand la ligne casse (masque le rendu de ligne)
         caughtFish: [], // liste des emojis des poissons capturés
         biggestCatch: null, // {emoji,name,size,estimatedWeight}
+        // Suivi par espèce
+        speciesStats: {
+            '🦐': { count: 0, totalWeight: 0 }, // Crevette
+            '🐠': { count: 0, totalWeight: 0 }, // Poisson Tropical
+            '🐡': { count: 0, totalWeight: 0 }, // Poisson Ballon
+            '🐟': { count: 0, totalWeight: 0 }, // Poisson Commun
+            '🦑': { count: 0, totalWeight: 0 }, // Calmar
+            '🐙': { count: 0, totalWeight: 0 }, // Pieuvre
+            '🐋': { count: 0, totalWeight: 0 }, // Baleine
+            '🪼': { count: 0, totalWeight: 0 }, // Méduse
+            '🐉': { count: 0, totalWeight: 0 }, // Dragon
+            '🧜‍♂️': { count: 0, totalWeight: 0 }, // Sirène
+            '🧜‍♀️': { count: 0, totalWeight: 0 }, // Sirène
+            '🦈': { count: 0, totalWeight: 0 }, // Requin
+            '🐢': { count: 0, totalWeight: 0 }, // Tortue
+            '🐚': { count: 0, totalWeight: 0 }, // Coquillage
+            '🦀': { count: 0, totalWeight: 0 }, // Crabe
+            '🐊': { count: 0, totalWeight: 0 }, // Crocodile
+            '🦭': { count: 0, totalWeight: 0 }, // Phoque
+            '🐧': { count: 0, totalWeight: 0 }, // Pingouin
+            '🐳': { count: 0, totalWeight: 0 }, // Baleine
+            '🦞': { count: 0, totalWeight: 0 }  // Homard
+        },
         progress: loadProgress(),
         // Facteur de poids de l'hameçon (1 par défaut); surchargé par progression.features.hookWeightFactor
         hookWeightFactor: 1,
@@ -374,14 +397,11 @@
     if (gameState.progress?.stats?.cumulativeWeightKg) {
         gameState.totalWeight = gameState.progress.stats.cumulativeWeightKg * 1000; // Convertir kg en grammes
     }
-
     // Variables pour l'animation
     let animationId = null;
     let lastTime = 0;
-
     // Accumulateur de spawn
     // (utiliser gameState.spawnAccumulator)
-
     // Fonction pour injecter les styles CSS
     function injectStyles() {
         if (document.getElementById('fishing-game-styles')) return;
@@ -412,9 +432,11 @@
                 -webkit-touch-callout: none;
                 -webkit-tap-highlight-color: transparent;
                 resize: both;
-                overflow: hidden;
+                /* Permettre aux boutons flottants de dépasser visuellement */
+                overflow: visible;
                 --uiScale: 0.8; /* Échelle UI responsive (réduit) */
                 font-family: 'Concert One', 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+                z-index: 30001; /* base au-dessus du fond */
             }
             
             /* Appliquer la police à tous les éléments internes */
@@ -491,7 +513,7 @@
                 height: 36px;
                 box-sizing: border-box;
             }
-            /* Règles responsive retirées pour préserver la mise à l’échelle desktop contrôlée en JS */
+            /* Règles responsive retirées pour préserver la mise à l'échelle desktop contrôlée en JS */
             .fishing-timer-display .timer-row {
                 display: flex; 
                 align-items: center; 
@@ -507,7 +529,7 @@
                 font-size: 12px;
                 opacity: 0.95;
             }
-            .fishing-score-corner { display:flex; }
+            .fishing-score-corner { display:none; }
             
             .fishing-game-controls {
                 display: none;
@@ -657,7 +679,6 @@
                 font-weight: 800;
                 letter-spacing: 1px;
             }
-            
             .fishing-stats-container {
                 background: rgba(0,0,0,0.3);
                 border-radius: 20px;
@@ -701,6 +722,202 @@
             .fishing-close-btn {
                 display: none;
             }
+            
+            /* Styles pour la fenêtre de statistiques */
+            .fishing-stats-button {
+                background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                font-size: 14px;
+                border-radius: 6px;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+                transition: all 0.2s ease;
+                margin-left: 8px;
+            }
+            
+            .fishing-stats-button:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+            }
+            
+            .fishing-stats-window {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+            transform: translate(-50%, -50%);
+                width: auto; /* auto-fit */
+                max-width: min(900px, 95vw);
+                max-height: 90vh;
+                background: #ede7d9; /* papier plus foncé */
+                color: #111827; /* slate-900 */
+                border-radius: 16px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+                border: 1px solid #c8bda9;
+                font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif;
+            }
+            .fishing-stats-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 14px;
+                background: linear-gradient(180deg, #e6dcc7, #ddd1b9);
+                border-bottom: 1px solid #cdbf9f;
+                border-radius: 16px 16px 0 0;
+                cursor: move; /* drag handle */
+                gap: 8px;
+                box-sizing: border-box;
+                flex-shrink: 0;
+            }
+            .fishing-stats-header h3 { margin:0; font-weight:800; letter-spacing:.3px; font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif; color:#0f172a; font-size:18px; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+            .fishing-stats-close { background:#7f1d1d; color:#fff; border:none; padding:6px 10px; border-radius:8px; cursor:pointer; }
+            
+            .fishing-stats-content {
+                padding: 14px;
+                height: auto;
+                max-height: calc(90vh - 64px);
+                overflow: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .fisherman-idcard {
+                display: grid;
+                grid-template-columns: 220px 1fr;
+                gap: 14px;
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 14px;
+                padding: 10px 12px;
+            }
+            .fisherman-id-left { display:flex; flex-direction: column; align-items:center; justify-content:flex-start; width:220px; box-sizing:border-box; }
+            .fisherman-id-right {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px 16px;
+                align-content: start;
+            }
+            .id-row { display:flex; justify-content:space-between; padding:4px 8px; background:rgba(0,0,0,0.12); border:1px solid rgba(0,0,0,0.2); border-radius:6px; }
+            .id-label { color:#334155; font-size:11px; font-weight:600; }
+            .id-value { color:#0f172a; font-weight:800; font-size:12px; word-break:break-word; }
+            .id-species-wrap { margin-top:10px; }
+            .id-species-title { font-weight:900; color:#92400e; margin:4px 0 4px 0; font-size:12px; letter-spacing:.2px; }
+            .id-species-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap:4px; }
+            .id-species-item { display:flex; align-items:center; justify-content:space-between; background:#ebe3d2; border:1px solid #cbbd9f; border-radius:6px; padding:4px 6px; font-size:11px; color:#111827; }
+            .id-species-item .em { font-size:14px; margin-right:4px; }
+            .id-species-item .ct { font-weight:800; color:#1e3a8a; font-size:11px; }
+            
+            @media (max-width: 768px) {
+                .fisherman-idcard { grid-template-columns: 1fr; }
+                .fisherman-id-right { grid-template-columns: 1fr; }
+            }
+            
+            .fisherman-island {
+                position: relative;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 220px;
+                margin-bottom: 10px;
+                overflow: visible;
+                z-index: 5;
+            }
+            
+            #fisherman-canvas {
+                border-radius: 15px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                background: transparent;
+                border: 2px solid #8B4513;
+                animation: canvas-float 3s ease-in-out infinite;
+                display: block;
+                margin: 0 auto;
+                position: relative;
+                z-index: 1; /* laisser passer les cellules à droite au premier plan */
+                width: 200px;
+                height: 200px;
+            }
+            
+            @keyframes canvas-float {
+                0%, 100% { transform: translateY(0px); }
+                50% { transform: translateY(-3px); }
+            }
+            
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 15px;
+                position: relative;
+                z-index: 1;
+                flex: 1;
+            }
+            
+            .stat-category {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                padding: 15px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(5px);
+            }
+            
+            .stat-category h4 {
+                margin: 0 0 15px 0;
+                color: #fbbf24;
+                font-size: 18px;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+                border-bottom: 2px solid rgba(251, 191, 36, 0.3);
+                padding-bottom: 8px;
+            }
+            
+            .stat-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin: 10px 0;
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .stat-item:last-child {
+                border-bottom: none;
+            }
+            
+            .stat-label {
+                color: #e5e7eb;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            
+            .stat-value {
+                color: #10b981;
+                font-size: 16px;
+                font-weight: bold;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+            }
+            
+            /* Responsive design pour mobile */
+            @media (max-width: 1200px) {
+                .stats-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+            }
+            
+            @media (max-width: 768px) {
+                .fishing-stats-window {
+                    width: 95vw;
+                    height: 90vh;
+                }
+                
+                .stats-grid {
+                    grid-template-columns: 1fr;
+                }
+                
+                #fisherman-canvas {
+                    width: 180px;
+                    height: 180px;
+                }
+            }
         `;
         document.head.appendChild(style);
     }
@@ -716,14 +933,8 @@
         container.style.minHeight = bounds.min.height + 'px';
         container.style.maxWidth = bounds.max.width + 'px';
         container.style.maxHeight = bounds.max.height + 'px';
-
-        // Clamper la taille actuelle si elle dépasse le max autorisé
-        const rect = container.getBoundingClientRect();
-        const clampedH = Math.min(rect.height, bounds.max.height);
-        const clampedW = Math.min(rect.width, bounds.max.width);
-        if (rect.height !== clampedH) container.style.height = clampedH + 'px';
-        if (rect.width !== clampedW) container.style.width = clampedW + 'px';
-
+        // Ne pas forcer width/height en cours de jeu pour éviter les cassures de ligne
+        // Simplement recalculer les échelles internes
         try { calculateDepthScale(); adjustCanvasSize(); } catch(_) {}
     }
 
@@ -768,7 +979,6 @@
 
         return { min: { width: minW, height: minH }, max: { width: maxW, height: maxH } };
     }
-
     // Fonction pour faire spawner un chapeau flottant à la surface
     function spawnFloatingHat(emoji) {
         const canvas = document.querySelector('.fishing-game-canvas');
@@ -805,7 +1015,6 @@
         gameState.floatingHats.push(hat);
         console.log(`[Chapeau] ${emoji} spawné à la surface`);
     }
-
     // Fonction pour mettre à jour la physique des chapeaux flottants
     function updateFloatingHats(deltaSec, canvas) {
         gameState.floatingHats.forEach((hat, index) => {
@@ -838,7 +1047,6 @@
             hat.vx *= 0.98;
         });
     }
-
     // Fonction pour vérifier la collision entre l'hameçon et les chapeaux
     function checkHatCollision() {
         if (!gameState.hookPosition) return;
@@ -930,7 +1138,6 @@
         saveProgress();
         console.log('[Chapeau] Chapeau déséquipé');
     }
-
     // Fonction pour afficher le menu de sélection de chapeaux
     function showHatSelectionMenu() {
         const ownedHats = gameState.progress?.hats?.owned || [];
@@ -1103,12 +1310,10 @@
         gameState.renderScale = 1; // rendu en coordonnées pixels du canvas courant
         gameState.renderDpr = dpr;
     }
-
     // Fonction pour créer l'interface du jeu
     function createGameInterface() {
         const container = document.createElement('div');
         container.className = 'fishing-game-container';
-        
         container.innerHTML = `
             <div class="fishing-game-drag-handle"></div>
             <div class="fishing-game-header">
@@ -1127,9 +1332,266 @@
                     <div class="scores-inline">
                         <div>Score: <span id="fishing-score">0</span></div>
                         <div>Meilleur: <span id="fishing-high-score">${gameState.highScore}</span></div>
-                        <div>Poids: <span id="fishing-weight">0g</span></div>
                     </div>
-                    
+                    <button id="fishing-stats-button" class="fishing-stats-button" title="Carte de pêche" onclick="showStatsWindow()" style="display:none;">🪪</button>
+                </div>
+            </div>
+            <!-- Fenêtre de statistiques du pêcheur -->
+            <div id="fishing-stats-window" class="fishing-stats-window" style="display: none;">
+                <div class="fishing-stats-header fishing-game-drag-handle">
+                    <h3>🪪 Carte de pêche</h3>
+                    <button id="fishing-stats-close" class="fishing-stats-close" onclick="hideStatsWindow()">✕</button>
+                </div>
+                <div class="fishing-stats-content">
+                    <div class="fisherman-idcard"style="margin:10px;">
+                        <div class="fisherman-id-left">
+                            <div class="fisherman-island">
+                                <canvas id="fisherman-canvas" width="220" height="220"></canvas>
+                            </div>
+                            <div id="id-identity-box" style="margin-top:8px; font-size:12px; color:#0f172a; background:#efe6d3; border:1px solid #cbbd9f; border-radius:6px; padding:6px 8px; width:100%; box-sizing:border-box;">
+                                <div style="display:flex; justify-content:space-between; padding:2px 0;">
+                                    <span style="color:#334155; font-weight:600;">Pêcheur</span>
+                                    <span style="font-weight:800;" id="id-left-name">—</span>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; padding:2px 0;">
+                                    <span style="color:#334155; font-weight:600;">Niveau</span>
+                                    <span style="font-weight:800;" id="id-left-level">—</span>
+                                </div>
+                            </div>
+                            <div id="id-active-perks" style="margin-top:8px; font-size:11px; color:#0f172a; background:#e9e0cd; border:1px solid #cbbd9f; border-radius:6px; padding:6px 8px; width:100%; box-sizing:border-box;">
+                                <div style="font-weight:900; color:#92400e; margin-bottom:4px;">Perks actifs</div>
+                                <div id="id-active-perks-values" style="display:grid; grid-template-columns:1fr; gap:4px 8px;">
+                                    <div style="display:flex; justify-content:space-between;"><span>Spawn</span><span>x<span id="perk-spawn">1.0</span></span></div>
+                                    <div style="display:flex; justify-content:space-between;"><span>Points</span><span>x<span id="perk-points">1.0</span></span></div>
+                                    <div style="display:flex; justify-content:space-between;"><span>Rembobinage</span><span>x<span id="perk-reel">1.0</span></span></div>
+                                    <div style="display:flex; justify-content:space-between;"><span>Rés. tension</span><span>x<span id="perk-tension">1.0</span></span></div>
+                                    <div style="display:flex; justify-content:space-between;"><span>Rés. casse</span><span>x<span id="perk-break">1.0</span></span></div>
+                                    <div style="display:flex; justify-content:space-between;"><span>Poids</span><span>x<span id="perk-weight">1.0</span></span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="fisherman-id-right" style="align-content:start; grid-auto-rows:minmax(32px, auto); gap:8px 12px; position:relative; z-index: 2;">
+                            <div class="id-row"><span class="id-label">Meilleur Score</span><span class="id-value" id="id-highscore">—</span></div>
+                            <div class="id-row"><span class="id-label">Score Cumulé</span><span class="id-value" id="id-score-sum">—</span></div>
+                            <div class="id-row"><span class="id-label">Poids Cumulé</span><span class="id-value" id="id-weight-sum">—</span></div>
+                            <div class="id-row"><span class="id-label">Total Captures</span><span class="id-value" id="id-total-catches">—</span></div>
+                            <div class="id-row"><span class="id-label">Espèces Uniques</span><span class="id-value" id="id-unique">—</span></div>
+                            <div class="id-row"><span class="id-label">Temps Total</span><span class="id-value" id="id-playtime">—</span></div>
+                            <div class="id-row"><span class="id-label">Lancers</span><span class="id-value" id="id-casts">—</span></div>
+                            <div class="id-row"><span class="id-label">Casses</span><span class="id-value" id="id-breaks">—</span></div>
+                            
+                            <div class="id-species-wrap">
+                                <div class="id-species-title">Captures par espèce</div>
+                                <div id="id-species-counts" class="id-species-grid"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stats-grid" style="display:none;">
+                        <div class="stat-category">
+                            <h4>📈 Performance</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Score Actuel:</span>
+                                <span class="stat-value" id="stats-current-score">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Meilleur Score:</span>
+                                <span class="stat-value" id="stats-high-score">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Score Cumulé:</span>
+                                <span class="stat-value" id="stats-cumulative-score">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Niveau:</span>
+                                <span class="stat-value" id="stats-level">1</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Poids Total:</span>
+                                <span class="stat-value" id="stats-total-weight">0g</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Poids Cumulé:</span>
+                                <span class="stat-value" id="stats-cumulative-weight">0kg</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>🐟 Captures</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Total Captures:</span>
+                                <span class="stat-value" id="stats-total-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Espèces Uniques:</span>
+                                <span class="stat-value" id="stats-unique-species">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures de Nuit:</span>
+                                <span class="stat-value" id="stats-night-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Géantes:</span>
+                                <span class="stat-value" id="stats-giant-fish">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Max/Partie:</span>
+                                <span class="stat-value" id="stats-max-game-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Total Morsures:</span>
+                                <span class="stat-value" id="stats-total-bites">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>🎣 Techniques</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Total Lancers:</span>
+                                <span class="stat-value" id="stats-total-casts">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Casses de Ligne:</span>
+                                <span class="stat-value" id="stats-line-breaks">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Meilleure Série:</span>
+                                <span class="stat-value" id="stats-best-streak">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Série Actuelle:</span>
+                                <span class="stat-value" id="stats-current-streak">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Détections Immobiles:</span>
+                                <span class="stat-value" id="stats-still-detections">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Détections Volantes:</span>
+                                <span class="stat-value" id="stats-hover-detections">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>⏰ Temps de Jeu</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Temps Total:</span>
+                                <span class="stat-value" id="stats-total-play-time">0h</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Temps de Jour:</span>
+                                <span class="stat-value" id="stats-day-time">0h</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Parties Jouées:</span>
+                                <span class="stat-value" id="stats-games-played">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Temps de Tension:</span>
+                                <span class="stat-value" id="stats-tension-time">0s</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Temps au Fond:</span>
+                                <span class="stat-value" id="stats-bottom-hold">0s</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Visites Profondes:</span>
+                                <span class="stat-value" id="stats-deep-visits">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>🏆 Réussites</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Trésors Trouvés:</span>
+                                <span class="stat-value" id="stats-treasures">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Sûres:</span>
+                                <span class="stat-value" id="stats-safe-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Aléatoires:</span>
+                                <span class="stat-value" id="stats-random-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Scores Parfaits:</span>
+                                <span class="stat-value" id="stats-perfect-scores">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Rapides:</span>
+                                <span class="stat-value" id="stats-fast-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures Transformées:</span>
+                                <span class="stat-value" id="stats-transformed-catches">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>🐠 Espèces Spécifiques</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Crevettes:</span>
+                                <span class="stat-value" id="stats-shrimp-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Poissons Ballons:</span>
+                                <span class="stat-value" id="stats-puffer-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Calamars:</span>
+                                <span class="stat-value" id="stats-squid-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Pieuvres:</span>
+                                <span class="stat-value" id="stats-octopus-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Baleines:</span>
+                                <span class="stat-value" id="stats-whales-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Méduses:</span>
+                                <span class="stat-value" id="stats-jellyfish-caught">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category">
+                            <h4>🌅 Saisons & Moments</h4>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures d'Été:</span>
+                                <span class="stat-value" id="stats-summer-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures d'Aube:</span>
+                                <span class="stat-value" id="stats-dawn-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Captures d'Automne:</span>
+                                <span class="stat-value" id="stats-autumn-catches">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Sirènes:</span>
+                                <span class="stat-value" id="stats-sirens-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Hommes-Poissons:</span>
+                                <span class="stat-value" id="stats-mermen-caught">0</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Dragons:</span>
+                                <span class="stat-value" id="stats-dragons-caught">0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-category" style="grid-column: 1 / -1;">
+                            <h4>🐟 Statistiques par Espèce</h4>
+                            <div id="species-stats-container">
+                                <div style="color: #94a3b8; font-style: italic; text-align: center; padding: 20px;">
+                                    Aucune capture enregistrée
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -1140,10 +1602,7 @@
                 <div id="hook-weight-value" style="position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:11px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.5);">${(gameState.progress?.features?.hookWeightFactor||1).toFixed(1)}×</div>
             </div>
 
-            <div id="fishing-score-corner" class="fishing-score-corner">
-                <div>Score: <span id="fishing-score">0</span></div>
-                <div>Meilleur: <span id="fishing-high-score">${gameState.highScore}</span></div>
-            </div>
+            
             
             <div id="fishing-instructions" class="fishing-instructions">
                 <h2>🎣 Instructions</h2>
@@ -1161,6 +1620,23 @@
         `;
         
         document.body.appendChild(container);
+        // Déplacer la carte de pêche (stats) hors du conteneur du jeu pour l'avoir au même niveau que le guide
+        try {
+            const statsInContainer = container.querySelector('#fishing-stats-window');
+            if (statsInContainer) {
+                document.body.appendChild(statsInContainer);
+            }
+        } catch (_) {}
+        // Enregistrer la fenêtre de jeu pour z-index manager et drag
+        try { registerFishingWindow(container); } catch(_) {}
+        try { makeDraggable(container); } catch(_) {}
+        // Toujours remonter au premier plan sur interaction directe
+        try {
+            const handler = () => bringToFront(container);
+            container.addEventListener('mousedown', handler, true);
+            container.addEventListener('pointerdown', handler, true);
+            container.addEventListener('click', handler, true);
+        } catch(_) {}
         // Ajuster taille canvas dès la création
         try { adjustCanvasSize(); } catch(_){ }
         // Empêcher le scroll/zoom par gestes et le menu contextuel dans la fenêtre du jeu
@@ -1193,11 +1669,10 @@
             } catch (e) {
             }
         }
-        
         // Ajouter la fonctionnalité de déplacement
         makeDraggable(container);
         
-        // Bouton guide (fixe en haut-gauche)
+        // Bouton guide (positionné à droite du conteneur)
         let guideBtn = document.getElementById('fishing-guide-btn-fixed');
         if (!guideBtn) {
             guideBtn = document.createElement('button');
@@ -1205,11 +1680,53 @@
             guideBtn.title = 'Guide';
             guideBtn.setAttribute('aria-label', 'Guide');
             guideBtn.textContent = '📙';
-            guideBtn.style.cssText = 'position:fixed;top:10px;left:10px;z-index:10010;background:linear-gradient(135deg, rgba(15, 42, 107, 0.98), rgba(30, 58, 138, 0.98));color:white;border:none;border-radius:8px;padding:6px 10px;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
-            document.body.appendChild(guideBtn);
+            guideBtn.style.position = 'absolute';
+            guideBtn.style.zIndex = '10010';
+            guideBtn.style.background = 'transparent';
+            guideBtn.style.color = 'white';
+            guideBtn.style.border = 'none';
+            guideBtn.style.padding = '0';
+            guideBtn.style.fontSize = '32px';
+            guideBtn.style.borderRadius = '0';
+            guideBtn.style.cursor = 'pointer';
+            guideBtn.style.boxShadow = 'none';
+            guideBtn.style.opacity = '1';
+            container.appendChild(guideBtn);
         }
         guideBtn.onclick = showGuide;
-
+        // Positionner le bouton guide visuellement hors du conteneur (à droite)
+        guideBtn.style.top = '10px';
+        guideBtn.style.left = 'calc(100% + 8px)';
+        guideBtn.style.right = '';
+        // Bouton carte de pêche (à côté du guide)
+        let idcardBtn = document.getElementById('fishing-idcard-btn-fixed');
+        if (!idcardBtn) {
+            idcardBtn = document.createElement('button');
+            idcardBtn.id = 'fishing-idcard-btn-fixed';
+            idcardBtn.title = 'Carte de pêche';
+            idcardBtn.setAttribute('aria-label', 'Carte de pêche');
+            idcardBtn.textContent = '🪪';
+            idcardBtn.style.position = 'absolute';
+            idcardBtn.style.zIndex = '10010';
+            idcardBtn.style.background = 'transparent';
+            idcardBtn.style.color = 'white';
+            idcardBtn.style.border = 'none';
+            idcardBtn.style.padding = '0';
+            idcardBtn.style.fontSize = '32px';
+            idcardBtn.style.borderRadius = '0';
+            idcardBtn.style.cursor = 'pointer';
+            idcardBtn.style.boxShadow = 'none';
+            idcardBtn.style.opacity = '1';
+            container.appendChild(idcardBtn);
+        }
+        idcardBtn.onclick = showStatsWindow;
+        // Position sous le bouton Guide, également hors du conteneur
+        idcardBtn.style.top = '50px';
+        idcardBtn.style.left = 'calc(100% + 8px)';
+        idcardBtn.style.right = '';
+        
+        // Les boutons sont désormais relatifs au conteneur; pas de repositionnement nécessaire
+        
         // Poignée de redimensionnement pour mobile (coin bas-droit)
         try {
             const resizer = document.createElement('div');
@@ -1283,7 +1800,7 @@
             });
         }
         
-        // Créer le bouton gestionnaire de cookies en dehors du conteneur (sur le fond)
+        // Créer le bouton gestionnaire de cookies en haut-gauche
         let floatingCookieBtn = document.getElementById('fishing-cookie-floating-btn');
         if (!floatingCookieBtn) {
             floatingCookieBtn = document.createElement('button');
@@ -1291,45 +1808,11 @@
             floatingCookieBtn.title = 'Gestionnaire de Cookies';
             floatingCookieBtn.setAttribute('aria-label', 'Gestionnaire de Cookies');
             floatingCookieBtn.textContent = '🔧';
-            floatingCookieBtn.style.position = 'fixed';
-            floatingCookieBtn.style.zIndex = '9000'; /* sous le conteneur (9999), mais visible */
-            floatingCookieBtn.style.background = 'linear-gradient(45deg, #10b981, #059669)';
-            floatingCookieBtn.style.color = 'white';
-            floatingCookieBtn.style.border = 'none';
-            floatingCookieBtn.style.padding = '6px 10px';
-            floatingCookieBtn.style.fontSize = '16px';
-            floatingCookieBtn.style.borderRadius = '10px';
-            floatingCookieBtn.style.boxShadow = '0 4px 12px rgba(16,185,129,0.45)';
-            floatingCookieBtn.style.cursor = 'pointer';
-            floatingCookieBtn.style.opacity = '0.95';
+            floatingCookieBtn.style.cssText = 'position:fixed;top:10px;left:10px;z-index:10010;background:linear-gradient(45deg, #10b981, #059669);color:white;border:none;border-radius:10px;padding:6px 10px;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(16,185,129,0.45);opacity:0.95';
             document.body.appendChild(floatingCookieBtn);
             floatingCookieBtn.addEventListener('click', showCookieManager);
         }
 
-        // Positionner le bouton flottant aligné avec le cartouche UI (timer centré en bas)
-        const positionFloatingCookieBtn = () => {
-            const rect = container.getBoundingClientRect();
-            const timerHeight = 36; // hauteur CSS réduite du timer
-            const bottomPadding = 8; // comme dans le CSS du timer
-            const btnRect = floatingCookieBtn.getBoundingClientRect();
-            const btnHalfH = btnRect.height ? btnRect.height / 2 : 16;
-            const y = rect.bottom - bottomPadding - (timerHeight / 2) - btnHalfH + window.scrollY;
-            const x = rect.right + 10 + window.scrollX; // à droite du conteneur
-            floatingCookieBtn.style.top = `${Math.max(10, y)}px`;
-            floatingCookieBtn.style.left = `${x}px`;
-        };
-
-        // Mettre à jour la position régulièrement et sur resize/scroll
-        positionFloatingCookieBtn();
-        window.addEventListener('resize', positionFloatingCookieBtn);
-        window.addEventListener('scroll', positionFloatingCookieBtn, { passive: true });
-        const posInterval = setInterval(() => {
-            if (!document.body.contains(container) || !document.body.contains(floatingCookieBtn)) {
-                clearInterval(posInterval);
-                return;
-            }
-            positionFloatingCookieBtn();
-        }, 150);
         
         // Calculer le nombre maximum de poissons initial même sans restauration
         setTimeout(() => {
@@ -1487,7 +1970,6 @@
         gameState.view.ctx = ctx;
         return { canvas, ctx };
     }
-
     // Fonction pour supprimer la ligne lors du redimensionnement
     function removeLineOnResize() {
         // Vérifier si on est en train de pêcher (avec ou sans poisson)
@@ -1533,7 +2015,6 @@
             showToast('Ligne supprimée lors du redimensionnement !', 'warning');
         }
     }
-
     // Initialiser les nuages
     function initClouds(canvas) {
         const weatherEmojis = {
@@ -1588,7 +2069,6 @@
             });
         }
     }
-
     // Mettre à jour et dessiner les nuages
     function drawClouds(ctx, canvas) {
         if (!gameState.clouds || gameState.clouds.length === 0) {
@@ -1651,27 +2131,37 @@
                 }
             }
         };
-        const drawSet = (set, alphaScale) => {
-            updateSunMoonPositions(set || []);
-            for (const cloud of set) {
-                if (!cloud.isSun && !cloud.isMoon) {
-                    cloud.x += cloud.speed * 0.016; // ~60fps
-                    if (cloud.x > canvas.width + 50) {
-                        cloud.x = -50;
-                        cloud.y = 5 + Math.random() * 25; // Respawn dans les 30 pixels du haut
-                    }
-                }
-                // Dessiner
-                const baseAlpha = (cloud.opacity ?? 1);
-                const over = (cloud._alphaOverride === undefined) ? 1 : cloud._alphaOverride;
-                ctx.globalAlpha = baseAlpha * over * alphaScale;
-                ctx.font = `${cloud.size}px sans-serif`;
-                ctx.fillText(cloud.emoji, cloud.x, cloud.y);
-            }
-        };
         const baseDayNight = 0.0035;
         const speedFactor = ((gameState.dayNightSpeed ?? baseDayNight) / baseDayNight);
         const cf = gameState.cloudsCrossfade ?? 1;
+        // Helper local pour dessiner un ensemble (nuages + soleil/lune) avec alpha
+        const drawSet = (set, alphaMul) => {
+            if (!Array.isArray(set) || set.length === 0) return;
+            // Mettre à jour positions soleil/lune si présents
+            try { updateSunMoonPositions(set); } catch(_) {}
+            const wrapX = (x) => {
+                if (x < -60) return canvas.width + 60;
+                if (x > canvas.width + 60) return -60;
+                return x;
+            };
+            for (const c of set) {
+                const size = Math.max(10, Math.round(c.size || 24));
+                const baseAlpha = typeof c.opacity === 'number' ? c.opacity : 1;
+                const override = typeof c._alphaOverride === 'number' ? c._alphaOverride : 1;
+                const a = Math.max(0, Math.min(1, baseAlpha * override * (alphaMul ?? 1)));
+                ctx.save();
+                ctx.globalAlpha = a;
+                ctx.font = `${size}px sans-serif`;
+                const emoji = c.isSun ? '☀️' : (c.isMoon ? '🌙' : (c.emoji || '☁️'));
+                ctx.fillText(emoji, c.x, c.y);
+                ctx.restore();
+                // Déplacement horizontal simple des nuages
+                const sp = c.speed || 10;
+                if (!c.isSun && !c.isMoon) {
+                    c.x = wrapX((c.x || 0) + sp * 0.016);
+                }
+            }
+        };
         if (gameState.cloudsOld && gameState.cloudsNew && cf < 1) {
             // Appliquer easing doux pour les nuages aussi
             const easedCf = cf < 0.5 ? 
@@ -1849,7 +2339,6 @@
             }
         }
     }
-
     // Fonction utilitaire: mélange linéaire entre deux couleurs hex
     function lerpHex(c1, c2, t) {
         const a = hexToRgb(c1);
@@ -1859,7 +2348,6 @@
         const bch = Math.round(a.b + (b.b - a.b) * t);
         return `rgb(${r},${g},${bch})`;
     }
-
     // Définition des palettes par saison et période pour un dégradé à 6 zones
     // Périodes: night, dawn, day, dusk (avec night couvrant [0..0.2] et [0.85..1])
     // Zones: [skyTop, skyBottom, surface, shallow, mid, deep, abyssal]
@@ -1874,7 +2362,7 @@
             night:   ['#081022','#152235','#152235','#11305a','#0f3568','#0b2c57','#071f3d'],
             dawn:    ['#ff9e80','#ffccbc','#ffccbc','#caa6a5','#9bb1b8','#5a7ea6','#2c4f78'],
             day:     ['#4fc3f7','#0288d1','#0288d1','#0275b6','#01609a','#014a7b','#013a62'],
-            dusk:    ['#ff5722','#ff7043','#ff7043','#cb5a53','#95576a','#4e4d7e','#2a3a62']
+            dusk:    ['#ff5722','#ff7043','#ff7043','#cb5a53','#95576a','#4e4e7e','#2a3a62']
         },
         autumn: {
             night:   ['#160d08','#24140c','#24140c','#2d2219','#2e2c28','#232b3a','#172136'],
@@ -1889,7 +2377,6 @@
             dusk:    ['#5c6bc0','#7986cb','#7986cb','#6575b3','#505f97','#3d4b7b','#2b375f']
         }
     };
-
     // Calcule la période courante
     function getCurrentPeriod(t) {
         if (t < 0.2) return 'night';
@@ -1898,7 +2385,6 @@
         if (t < 0.85) return 'dusk';
         return 'night';
     }
-
     // Retourne la palette complète (6 zones + ciel) selon saison/période et météo
     function getBackgroundPalette() {
         const t = gameState.renderTimeOfDay || gameState.timeOfDay || 0;
@@ -2206,7 +2692,6 @@
             }
         }, 3000);
     }
-
     // Fonction pour dessiner le fond et l'eau
     function drawBackground(ctx, canvas) {
         // Filet de sécurité: si le cycle jour/nuit n'avance pas (p.ex. si updateDayNightCycle n'est pas appelé),
@@ -2442,7 +2927,6 @@
         });
         ctx.globalAlpha = 1;
     }
-
     // Fonction pour dessiner la canne à pêche
     function drawFishingRod(ctx, canvas) {
         const rodX = canvas.width - 100;
@@ -2604,7 +3088,6 @@
             ctx.restore();
         }
     }
-
     // Fonction pour dessiner les poissons
     function drawFish(ctx) {
         // Dessiner d'abord ceux non attachés
@@ -3010,7 +3493,6 @@
             }
         });
     }
-
     function drawSingleFish(ctx, x, y, size, emoji, angle){
         ctx.save();
         ctx.translate(x, y);
@@ -3031,10 +3513,6 @@
         ctx.fillText(emoji || '🐟', 0, 0);
         ctx.restore();
     }
-
-    // Accumulateur de spawn
-    // (utiliser gameState.spawnAccumulator)
-
     // Fonction pour générer de nouveaux poissons (taux par seconde, plafonné)
     function spawnFishTimed(deltaSec, canvas) {
         // Vérifier si le spawn automatique est activé (mode test)
@@ -3142,7 +3620,7 @@
                 maxSpeed *= perks.shrimpSpeed;
             }
             
-            const stamina = fishType.staminaRange[0] + Math.random() * (fishType.staminaRange[1] - fishType.staminaRange[0]);
+            // Stamina calculée avec les bonus de niveau (voir plus bas)
             const biteAffinity = fishType.biteAffinityRange[0] + Math.random() * (fishType.biteAffinityRange[1] - fishType.biteAffinityRange[0]);
             let aggression = fishType.aggressionRange[0] + Math.random() * (fishType.aggressionRange[1] - fishType.aggressionRange[0]);
             
@@ -3160,7 +3638,16 @@
                 const rarityFactor = Math.min(5, 1 / sw);
                 return Math.round(baseK * rarityFactor);
             }
-            const points = Math.round(computeBasePoints(fishType) + size * fishType.pointsPerSize);
+            let points = Math.round(computeBasePoints(fishType) + size * fishType.pointsPerSize);
+            
+            // Appliquer les bonus de niveau de l'espèce
+            const speciesLevel = gameState.progress?.speciesLevels?.[fishType.emoji] || 1;
+            const levelBonuses = getSpeciesLevelBonuses(fishType.emoji, speciesLevel);
+            
+            // Appliquer les bonus de taille et stamina
+            size *= levelBonuses.sizeMultiplier;
+            const stamina = (fishType.staminaRange[0] + Math.random() * (fishType.staminaRange[1] - fishType.staminaRange[0])) * levelBonuses.staminaMultiplier;
+            points = Math.round(points * levelBonuses.pointsMultiplier);
             
             // Profondeur de spawn basée sur des pixels fixes avec clamp (déjà calculée ci-dessus)
             
@@ -3209,7 +3696,6 @@
                 escaping: false
             };
             gameState.fish.push(fish);
-            
             // Log détaillé du spawn du poisson - Informations unifiées
             const speciesInfo = {
                 // Identification
@@ -3254,7 +3740,6 @@
             
         }
     }
-
     // Fonction pour mettre à jour les poissons
     function updateFish(canvas) {
         gameState.fish.forEach(fish => {
@@ -3554,7 +4039,6 @@
                 spentMs = windowMs;
             }
         }
-        
         // Patterns directionnels maintenus (si pas déjà détecté)
         if (detected === 'unknown') {
             if (msFront >= needed && msFront > msBack + 200) {
@@ -3618,7 +4102,6 @@
         gameState._lastPatternType = detected;
         return { type: detected, score };
     }
-
     function checkHookCollisions() {
         if (!gameState.isCasting) return;
         if (gameState.attachedFish.length > 0) return; // un seul poisson à la fois
@@ -3803,7 +4286,6 @@
         });
         // pattern sparkle log removed
     }
-
     function updateEffects(deltaSec) {
         if (!gameState.effects) return;
         gameState.effects.forEach(e => { e.age += deltaSec; });
@@ -3866,6 +4348,11 @@
     // Fonction pour basculer l'état du timer
     function toggleTimer() {
         gameState.timerEnabled = !gameState.timerEnabled;
+        // Si on vient d'activer le timer: remettre à 60s et attendre le prochain lancer
+        if (gameState.timerEnabled) {
+            gameState.gameStartTime = 0; // 0 => updateTime affiche 60 jusqu'au premier lancer
+            gameState.timeLeft = 60;
+        }
         
         // Afficher un message de feedback
         const message = gameState.timerEnabled ? 
@@ -3877,7 +4364,6 @@
         // Mettre à jour l'affichage du score pour refléter l'état
         updateScoreDisplay();
     }
-
     // Fonction pour mettre à jour l'affichage du score avec l'état du timer
     function updateScoreDisplay() {
         const scoreElement = document.getElementById('fishing-score');
@@ -3922,21 +4408,7 @@
             }
         }
         
-        // Mettre à jour le poids total
-        const weightElement = document.getElementById('fishing-weight');
-        if (weightElement) {
-            // Afficher le poids en format lisible (kg si > 1000g)
-            const weight = gameState.totalWeight;
-            if (weight >= 1000) {
-                weightElement.textContent = `${(weight / 1000).toFixed(1)}kg`;
-            } else {
-                weightElement.textContent = `${Math.round(weight)}g`;
-            }
-            
-            // En mode sans chrono, le poids compte aussi: pas d'effet barré/atténué
-                weightElement.style.opacity = '1';
-                weightElement.style.textDecoration = 'none';
-        }
+        // Affichage du poids supprimé de la barre d'UI
         
     }
 
@@ -4047,7 +4519,6 @@
         }
         }
     }
-
     // Fonction pour lancer la ligne
     function castLine() {
         if (!gameState.isCasting && gameState.castPower > 0) {
@@ -4057,10 +4528,8 @@
                 // Afficher l'UI du jeu
                 const caughtDisplay = document.getElementById('fishing-caught-display');
                 const timerDisplay = document.getElementById('fishing-timer-display');
-                const scoreCorner = document.getElementById('fishing-score-corner');
                 if (caughtDisplay) caughtDisplay.style.display = 'flex';
                 if (timerDisplay) timerDisplay.style.display = 'block';
-                if (scoreCorner) scoreCorner.style.display = 'flex';
             }
             
             const canvas = document.getElementById('fishing-canvas');
@@ -4108,7 +4577,6 @@
             }
         }
     }
-
     // Mise à jour physique de l'hameçon
     function updateHookPhysics(deltaSec, canvas){
         if (!gameState.isCasting || !canvas || !gameState.isPlaying) return;
@@ -4501,7 +4969,6 @@
             return;
         }
 	}
-
     // Rembobinage progressif
     function reelUpdate(deltaSec){
         if (!gameState.isCasting) return;
@@ -4576,6 +5043,38 @@
                     for (let i = 0; i < catchMult; i++) {
                         gameState.caughtFish.push(att.fish.emoji || '🐟');
                     }
+                    
+                    // Mettre à jour les statistiques par espèce
+                    const fishEmoji = att.fish.emoji || '🐟';
+                    const estimatedWeight = Math.max(0.1, (att.fish.size / 10)); // Poids simple ~ taille/10
+                    
+                    if (!gameState.speciesStats) {
+                        gameState.speciesStats = {};
+                    }
+                    
+                    if (!gameState.speciesStats[fishEmoji]) {
+                        gameState.speciesStats[fishEmoji] = { count: 0, totalWeight: 0 };
+                    }
+                    
+                    // Incrémenter le compteur et ajouter le poids pour chaque capture (selon le multiplicateur)
+                    for (let i = 0; i < catchMult; i++) {
+                        gameState.speciesStats[fishEmoji].count += 1;
+                        gameState.speciesStats[fishEmoji].totalWeight += estimatedWeight;
+                    }
+                    
+                    // Sauvegarder immédiatement les statistiques d'espèce dans le cookie
+                    if (!gameState.progress.speciesStats) {
+                        gameState.progress.speciesStats = {};
+                    }
+                    if (!gameState.progress.speciesStats[fishEmoji]) {
+                        gameState.progress.speciesStats[fishEmoji] = { count: 0, totalWeight: 0 };
+                    }
+                    gameState.progress.speciesStats[fishEmoji].count += catchMult;
+                    gameState.progress.speciesStats[fishEmoji].totalWeight += estimatedWeight * catchMult;
+                    
+                    // Mettre à jour le niveau de l'espèce et sauvegarder
+                    updateSpeciesLevel(fishEmoji);
+                    saveProgress();
                     // Mettre à jour le plus gros poisson capturé
                     if (!gameState.biggestCatch || att.fish.size > gameState.biggestCatch.size) {
                         const estimatedWeight = Math.max(0.1, (att.fish.size / 10)); // Poids simple ~ taille/10
@@ -4648,6 +5147,12 @@
                 if (gameState.timerEnabled) {
                 gameState.progress.stats.cumulativeScore = (gameState.progress.stats.cumulativeScore || 0) + gained;
                 }
+                
+                    // Les statistiques par espèce sont maintenant sauvegardées immédiatement lors de chaque capture
+                    // Réinitialiser les statistiques temporaires de la partie actuelle
+                    if (isProgressionEnabled() && gameState.speciesStats) {
+                        gameState.speciesStats = {};
+                    }
                 // Poids cumulé (somme des poids estimés) — COMPTE TOUJOURS, même sans chrono
                 function estimateWeightKgByType(fish) {
                     // Modèle générique W = a * L^b (L en cm)
@@ -4840,7 +5345,6 @@
             updatePowerBar();
         }
     }
-
     // Fonction pour dessiner le jeu
     function drawGame(ctx, canvas) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -5074,7 +5578,7 @@
             }
         }
         
-        // Zone abyssal (1140-1740px)
+        // Zone abyssale (1140-1740px)
         if (currentDepth < waterDepth) {
             const abyssalEnd = Math.min(currentDepth + scaledZones.abyssal, waterDepth);
             if (abyssalEnd > currentDepth) {
@@ -5115,7 +5619,6 @@
         
         return false;
     }
-
     // Fonction pour calculer les zones de profondeur adaptées à la profondeur d'eau disponible
     function calculateDepthZones(waterDepth) {
         const scaledZones = getScaledDepthZones();
@@ -5171,7 +5674,6 @@
         
         return result;
     }
-
     // Fonction pour dessiner l'indicateur de profondeur
     function drawDepthIndicator(ctx, canvas) {
         const waterLevel = GAME_CONFIG.water.level;
@@ -5509,10 +6011,8 @@
         // Afficher l'UI du jeu immédiatement
         const caughtDisplay = document.getElementById('fishing-caught-display');
         const timerDisplay = document.getElementById('fishing-timer-display');
-        const scoreCorner = document.getElementById('fishing-score-corner');
         if (caughtDisplay) caughtDisplay.style.display = 'flex';
         if (timerDisplay) timerDisplay.style.display = 'block';
-        if (scoreCorner) scoreCorner.style.display = 'flex';
         
         // Mettre à jour l'affichage
         updateCaughtFishDisplay();
@@ -5522,7 +6022,6 @@
         lastTime = performance.now();
         gameLoop(lastTime);
     }
-
     // Fonction pour terminer le jeu
     function endGame() {
         // Laisser l'animation et l'écran du jeu continuer de bouger
@@ -5659,6 +6158,11 @@
                     initBackgroundAnimation();
                     // Démarrer automatiquement la partie
                     startGame();
+                    // Configurer les événements de stats après le démarrage
+                    setTimeout(() => {
+                        console.log('Configuration des événements de stats...');
+                        setupStatsEventListeners();
+                    }, 500);
                 }
             });
             
@@ -5710,12 +6214,16 @@
                     initBackgroundAnimation();
                     // Démarrer automatiquement la partie
                     startGame();
+                    // Configurer les événements de stats après le démarrage
+                    setTimeout(() => {
+                        console.log('Configuration des événements de stats...');
+                        setupStatsEventListeners();
+                    }, 500);
                 }
             });
             document.body.appendChild(floatBtn);
         }
     }
-
     // Fonction pour initialiser l'animation du fond et le spawn des poissons
     function initBackgroundAnimation() {
         // Masquer les instructions immédiatement
@@ -5763,7 +6271,6 @@
             requestAnimationFrame(backgroundLoop);
         }
     }
-    
     // Fonction pour configurer les événements
     function setupEventListeners() {
         // Utiliser AbortController pour un nettoyage global
@@ -5778,12 +6285,8 @@
             closeBtn.addEventListener('click', closeGame, { signal });
         }
         
-        // Touche Échap pour fermer
+        // Gestionnaire de touches (sans Échap pour fermer)
         const handleEscape = (e) => {
-            if (e.key === 'Escape' || e.key === 'Esc') {
-                closeGame();
-                document.removeEventListener('keydown', handleEscape);
-            }
             // Touche T pour ouvrir les outils de test
             if (e.key === 't' || e.key === 'T') {
                 showTestTools();
@@ -5819,19 +6322,22 @@
         if (gameContainer) {
             // Observer les changements de position et taille du conteneur de jeu
         const gameResizeObserver = new ResizeObserver(() => {
-            removeLineOnResize();
-            saveWindowState(); // Sauvegarder la nouvelle taille
+            // Ne pas retirer la ligne automatiquement pour éviter les cassures en cours d'action
             adjustCanvasSize(); // ajuster canvas + DPR
             // Recalculer le nombre maximum de poissons
             const newMaxCount = calculateMaxFishCount();
+            // Sauvegarder l'état avec un léger debounce pour éviter les rafales
+            clearTimeout(gameState.__saveWindowDebounce);
+            gameState.__saveWindowDebounce = setTimeout(() => saveWindowState(), 250);
         });
             gameResizeObserver.observe(gameContainer);
         gameState.observers.push(gameResizeObserver);
             
             // Détecter les changements de position via MutationObserver
         const positionObserver = new MutationObserver(() => {
-                removeLineOnResize();
-                saveWindowState(); // Sauvegarder la nouvelle position
+                // Éviter de toucher à la ligne pendant les micro-mouvements
+                clearTimeout(gameState.__saveWindowDebounce);
+                gameState.__saveWindowDebounce = setTimeout(() => saveWindowState(), 250);
             });
             positionObserver.observe(gameContainer, {
                 attributes: true,
@@ -5846,9 +6352,9 @@
                 const currentPosition = { x: rect.left, y: rect.top };
                 
                 if (lastPosition.x !== currentPosition.x || lastPosition.y !== currentPosition.y) {
-                    removeLineOnResize();
                     lastPosition = currentPosition;
-                    saveWindowState(); // Sauvegarder la nouvelle position
+                    clearTimeout(gameState.__saveWindowDebounce);
+                    gameState.__saveWindowDebounce = setTimeout(() => saveWindowState(), 250);
                 }
             };
             
@@ -6167,6 +6673,491 @@
         });
     }
 
+    // Gestion commune du z-index des fenêtres (fenêtre active au premier plan)
+    if (typeof window.__fishingZCounter === 'undefined') {
+        window.__fishingZCounter = 30000;
+    }
+    function bringToFront(el) {
+        try {
+            // Calculer le z-index max parmi toutes les fenêtres connues
+            const selectors = [
+                '.fishing-game-container',
+                '.fishing-stats-window',
+                '.fishing-guide-window',
+                '#cookie-manager-window',
+                '.fishing-test-window',
+                '.hat-selection-menu'
+            ];
+            let maxZ = 30000;
+            const all = document.querySelectorAll(selectors.join(','));
+            all.forEach(n => {
+                const z = parseInt(getComputedStyle(n).zIndex || '0', 10) || 0;
+                if (z > maxZ) maxZ = z;
+            });
+            const next = maxZ + 1;
+            el.style.position = (getComputedStyle(el).position === 'static') ? 'fixed' : getComputedStyle(el).position;
+            el.style.zIndex = String(next);
+            window.__fishingZCounter = next;
+        } catch (_) {}
+    }
+    function registerFishingWindow(el) {
+        if (!el) return;
+        try {
+            const handler = () => bringToFront(el);
+            el.addEventListener('mousedown', handler);
+            el.addEventListener('pointerdown', handler);
+            el.addEventListener('click', handler, true);
+        } catch(_) {}
+        bringToFront(el);
+    }
+
+    // Délégation globale: toute interaction sur une fenêtre connue la met au premier plan
+    try {
+        const delegate = (e) => {
+            const w = e.target.closest('.fishing-stats-window, .fishing-guide-window, #cookie-manager-window, .fishing-test-window, .hat-selection-menu');
+            if (w) bringToFront(w);
+        };
+        document.addEventListener('mousedown', delegate, true);
+        document.addEventListener('pointerdown', delegate, true);
+        document.addEventListener('click', delegate, true);
+    } catch(_) {}
+
+    // Fonctions pour la fenêtre de statistiques
+    window.showStatsWindow = function() {
+        console.log('showStatsWindow appelée'); // Debug
+        const statsWindow = document.getElementById('fishing-stats-window');
+        console.log('Fenêtre stats trouvée:', statsWindow); // Debug
+        if (statsWindow) {
+            statsWindow.style.display = 'block';
+            registerFishingWindow(statsWindow);
+            try {
+                statsWindow.addEventListener('mousedown', () => bringToFront(statsWindow));
+                const hdr = statsWindow.querySelector('.fishing-stats-header');
+                if (hdr) hdr.addEventListener('mousedown', () => bringToFront(statsWindow));
+                // Activer le déplacement en utilisant le header comme poignée
+            try { makeDraggable(statsWindow); } catch(_) { console.warn('makeDraggable failed for stats'); }
+            } catch(_) {}
+            // Attendre un peu que le DOM soit prêt
+            setTimeout(() => {
+                updateStatsDisplay();
+                drawFishermanCanvas();
+                // Ajuster la largeur en fonction du contenu
+                try {
+                    const content = statsWindow.querySelector('.fishing-stats-content');
+                    const width = Math.min(900, Math.max(480, content.scrollWidth + 28));
+                    statsWindow.style.width = width + 'px';
+                } catch(_){}
+            }, 100);
+            console.log('Fenêtre stats affichée'); // Debug
+        } else {
+            console.error('Fenêtre stats non trouvée!'); // Debug
+        }
+    }
+
+    window.hideStatsWindow = function() {
+        const statsWindow = document.getElementById('fishing-stats-window');
+        if (statsWindow) {
+            statsWindow.style.display = 'none';
+        }
+    }
+    function updateStatsDisplay() {
+        const stats = gameState.progress?.stats || {};
+        
+        // Performance
+        updateStat('stats-current-score', gameState.score || 0);
+        updateStat('stats-high-score', gameState.highScore || 0);
+        updateStat('stats-cumulative-score', stats.cumulativeScore || 0);
+        updateStat('stats-level', gameState.level || 1);
+        updateStat('stats-total-weight', (gameState.totalWeight || 0) + 'g');
+        updateStat('stats-cumulative-weight', (stats.cumulativeWeightKg || 0).toFixed(1) + 'kg');
+        
+        // Remplir la carte d'identité
+        const hat = gameState.progress?.hats?.equipped || '—';
+        const toH = (v) => (v || 0);
+        const setText = (id, val) => { const n = document.getElementById(id); if (n) n.textContent = String(val); };
+        // Champs retirés du panneau droit: id-fisher-name et id-level
+        // miroirs dans le panneau gauche pour visibilité
+        const leftName = document.getElementById('id-left-name');
+        if (leftName) leftName.textContent = 'Pêcheur';
+        const leftLevel = document.getElementById('id-left-level');
+        if (leftLevel) leftLevel.textContent = String(gameState.level || 1);
+        setText('id-highscore', gameState.highScore || 0);
+        setText('id-score-sum', stats.cumulativeScore || 0);
+        setText('id-weight-sum', (stats.cumulativeWeightKg || 0).toFixed(1) + 'kg');
+        setText('id-total-catches', stats.totalCatches || 0);
+        setText('id-unique', stats.uniqueSpeciesCaught || 0);
+        setText('id-playtime', (stats.totalPlayTime || 0) + 's');
+        setText('id-casts', stats.totalCasts || 0);
+        setText('id-breaks', stats.lineBreaks || 0);
+        setText('id-hat', hat);
+        // Perks actifs (agrégés achievements + chapeaux)
+        try {
+            const pk = applyHatPerks();
+            const setPerk = (id, v) => { const n = document.getElementById(id); if (n) n.textContent = (v || 1).toFixed(2); };
+            setPerk('perk-spawn', pk.spawnMultiplier);
+            setPerk('perk-points', pk.pointMultiplier);
+            setPerk('perk-reel', pk.reelSpeed);
+            setPerk('perk-tension', pk.tensionResistance);
+            setPerk('perk-break', pk.breakResistance);
+            setPerk('perk-weight', pk.weightMultiplier);
+        } catch(_) {}
+        
+        // Mettre à jour les statistiques par espèce
+        updateSpeciesStatsDisplay();
+        
+        // ID card: species counts compact list
+        try {
+            const container = document.getElementById('id-species-counts');
+            if (container) {
+                const speciesStats = gameState.progress?.speciesStats || {};
+                const entries = Object.entries(speciesStats)
+                    .filter(([e, s]) => (s && s.count > 0))
+                    .sort((a,b)=> (b[1].count||0)-(a[1].count||0));
+                const top = entries.slice(0, 24);
+                if (top.length === 0) {
+                    container.innerHTML = '<div style="opacity:.7; font-style:italic; padding:6px;">Aucune capture</div>';
+                } else {
+                    container.innerHTML = top.map(([emoji, s]) => {
+                        const name = emoji;
+                        const count = s.count || 0;
+                        return `<div class="id-species-item"><span class="em">${name}</span><span class="ct">${count}</span></div>`;
+                    }).join('');
+                }
+            }
+        } catch(_) {}
+    }
+    
+    function updateStat(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+    
+    function drawFishermanCanvas() {
+        console.log('drawFishermanCanvas appelée'); // Debug
+        
+        // Attendre un peu plus longtemps pour s'assurer que le DOM est prêt
+        setTimeout(() => {
+            const canvas = document.getElementById('fisherman-canvas');
+            console.log('Canvas trouvé:', canvas); // Debug
+            if (!canvas) {
+                console.error('Canvas fisherman-canvas non trouvé!'); // Debug
+                return;
+            }
+            
+            console.log('Canvas dimensions:', canvas.width, 'x', canvas.height); // Debug
+            drawCanvasContent(canvas);
+        }, 200);
+    }
+    
+    function drawCanvasContent(canvas) {
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        console.log('Dessin du canvas:', width, 'x', height); // Debug
+        
+        // Nettoyer le canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        // Dessiner un fond simplifié (ciel + eau + vagues), sans fond marin ni décor
+        (function drawSimplifiedBackground(){
+            const waterLevel = Math.round(height * 0.55); // un peu plus bas en portrait
+            // Ciel → horizon → eau
+            const grad = ctx.createLinearGradient(0, 0, 0, height);
+            const pal = getBackgroundPalette();
+            grad.addColorStop(0, pal.skyTop);
+            grad.addColorStop(Math.max(0.001, (waterLevel - 1) / height), pal.skyBottom);
+            grad.addColorStop(waterLevel / height, pal.surface);
+            grad.addColorStop((waterLevel + (height - waterLevel) * 0.35) / height, pal.mid);
+            grad.addColorStop(1, pal.deep);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, width, height);
+            
+            // Vagues légères
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.lineWidth = 2;
+            const step = 28;
+            let prevX = 0;
+            let prevY = waterLevel + Math.sin(0) * (GAME_CONFIG.waves.amplitude || 4);
+            ctx.beginPath();
+            ctx.moveTo(0, prevY);
+            for (let x = step; x <= width; x += step) {
+                const y = waterLevel + Math.sin(x * 0.03) * (GAME_CONFIG.waves.amplitude || 4);
+                const midX = (prevX + x) / 2;
+                const midY = (prevY + y) / 2;
+                ctx.quadraticCurveTo(prevX, prevY, midX, midY);
+                prevX = x; prevY = y;
+            }
+            ctx.stroke();
+        })();
+        
+        // Dessiner la mise en scène (île + pêcheur + chapeau + canne) avec une échelle plus grande
+        (function drawSceneScaled(){
+            ctx.save();
+            // Calcul du décalage pour centrer la scène basée sur drawFishingRod (rodX=width-100, rodY=88)
+            const width = canvas.width;
+            const height = canvas.height;
+            const rodX = width+20;
+            const rodY = 180;
+            const approxFisherX = rodX + 20; // entre l'île (+30) et le pêcheur (+8)
+            const approxFisherY = rodY + 10;
+            const targetX = width / 2;
+            const targetY = height * 0.58; // un peu au-dessus de la ligne d'eau
+            const shiftX = targetX - approxFisherX;
+            const shiftY = targetY - approxFisherY;
+            // Appliquer la translation d'abord (en coordonnées non-scalées)
+            ctx.translate(shiftX, shiftY);
+            
+            // Échelle augmentée pour agrandir le pêcheur et l'île
+            const scale = 2.0;
+            ctx.scale(scale, scale);
+            try {
+                drawFishingRod(ctx, canvas);
+            } catch(e) { console.error('[Stats Canvas] drawFishingRod error', e); }
+            ctx.restore();
+        })();
+        
+        console.log('Canvas dessiné avec succès!'); // Debug
+    }
+    function updateSpeciesStatsDisplay() {
+        const speciesStats = gameState.progress?.speciesStats || {};
+        const speciesLevels = gameState.progress?.speciesLevels || {};
+        const speciesStatsContainer = document.getElementById('species-stats-container');
+        
+        if (!speciesStatsContainer) return;
+        
+        // Obtenir les noms des espèces depuis la configuration
+        const speciesNames = {
+            '🦐': 'Crevette',
+            '🐠': 'Poisson Tropical',
+            '🐡': 'Poisson Ballon',
+            '🐟': 'Poisson Commun',
+            '🦑': 'Calmar',
+            '🐙': 'Pieuvre',
+            '🐋': 'Baleine',
+            '🪼': 'Méduse',
+            '🐉': 'Dragon',
+            '🧜‍♂️': 'Sirène',
+            '🧜‍♀️': 'Sirène',
+            '🦈': 'Requin',
+            '🐢': 'Tortue',
+            '🐚': 'Coquillage',
+            '🦀': 'Crabe',
+            '🐊': 'Crocodile',
+            '🦭': 'Phoque',
+            '🐧': 'Pingouin',
+            '🐳': 'Baleine',
+            '🦞': 'Homard'
+        };
+        
+        // Trier les espèces par nombre de captures (décroissant)
+        const sortedSpecies = Object.entries(speciesStats)
+            .filter(([emoji, stats]) => stats.count > 0)
+            .sort((a, b) => b[1].count - a[1].count);
+        
+        if (sortedSpecies.length === 0) {
+            speciesStatsContainer.innerHTML = '<div style="color: #94a3b8; font-style: italic; text-align: center; padding: 20px;">Aucune capture enregistrée</div>';
+            return;
+        }
+        
+        // Créer le HTML pour les statistiques par espèce
+        let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-top: 15px;">';
+        
+        for (const [emoji, stats] of sortedSpecies) {
+            const name = speciesNames[emoji] || 'Espèce Inconnue';
+            const avgWeight = stats.count > 0 ? (stats.totalWeight / stats.count).toFixed(1) : '0.0';
+            const level = speciesLevels[emoji] || 1;
+            const levelBonuses = getSpeciesLevelBonuses(emoji, level);
+            
+            // Calculer le prochain niveau
+            const nextLevel = level + 1;
+            const capturesForNextLevel = Math.ceil(Math.pow(nextLevel - 1, 2) * 2.5);
+            const capturesNeeded = Math.max(0, capturesForNextLevel - stats.count);
+            
+            // Couleur du niveau basée sur la valeur
+            let levelColor = '#60a5fa'; // Bleu par défaut
+            if (level >= 20) levelColor = '#fbbf24'; // Or
+            else if (level >= 10) levelColor = '#a78bfa'; // Violet
+            else if (level >= 5) levelColor = '#34d399'; // Vert
+            
+            html += `
+                <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">${emoji}</span>
+                            <span style="font-weight: bold; color: #fbbf24;">${name}</span>
+                        </div>
+                        <div style="background: ${levelColor}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">
+                            Niveau ${level}
+                        </div>
+                    </div>
+                    <div style="font-size: 11px; color: #d1d5db; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Captures: <span style="color: #60a5fa;">${stats.count}</span></span>
+                            <span>Poids: <span style="color: #34d399;">${stats.totalWeight.toFixed(1)}kg</span></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Moyen: <span style="color: #f472b6;">${avgWeight}kg</span></span>
+                            <span>Prochain: <span style="color: #fbbf24;">${capturesNeeded}</span></span>
+                        </div>
+                    </div>
+                    <div style="font-size: 10px; color: #9ca3af; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px;">
+                        <div style="margin-bottom: 2px;">Bonus de niveau:</div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Taille: <span style="color: #34d399;">+${Math.round((levelBonuses.sizeMultiplier - 1) * 100)}%</span></span>
+                            <span>Stamina: <span style="color: #60a5fa;">+${Math.round((levelBonuses.staminaMultiplier - 1) * 100)}%</span></span>
+                        </div>
+                        <div style="text-align: center; margin-top: 2px;">
+                            <span>Points: <span style="color: #f472b6;">+${Math.round((levelBonuses.pointsMultiplier - 1) * 100)}%</span></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += '</div>';
+        speciesStatsContainer.innerHTML = html;
+    }
+    
+    // Fonction pour calculer les bonus de niveau d'une espèce
+    function getSpeciesLevelBonuses(emoji, level) {
+        if (!level || level <= 1) {
+            return {
+                sizeMultiplier: 1.0,
+                staminaMultiplier: 1.0,
+                pointsMultiplier: 1.0
+            };
+        }
+        
+        // Courbe de progression qui favorise le moyen terme
+        // Utilise une fonction logarithmique pour ralentir la progression aux niveaux élevés
+        const logLevel = Math.log(level);
+        const maxLevel = 50; // Niveau maximum théorique
+        const progressFactor = Math.min(logLevel / Math.log(maxLevel), 1.0);
+        
+        // Bonus de taille : +5% par niveau, plafonné à +150% (niveau 30)
+        const sizeBonus = Math.min(0.05 * (level - 1), 1.5);
+        
+        // Bonus de stamina : +3% par niveau, plafonné à +90% (niveau 30)
+        const staminaBonus = Math.min(0.03 * (level - 1), 0.9);
+        
+        // Bonus de points : +2% par niveau, plafonné à +60% (niveau 30)
+        const pointsBonus = Math.min(0.02 * (level - 1), 0.6);
+        
+        // Multiplicateur de progression pour ralentir aux niveaux élevés
+        const progressionMultiplier = 0.7 + (0.3 * (1 - progressFactor));
+        
+        return {
+            sizeMultiplier: 1.0 + (sizeBonus * progressionMultiplier),
+            staminaMultiplier: 1.0 + (staminaBonus * progressionMultiplier),
+            pointsMultiplier: 1.0 + (pointsBonus * progressionMultiplier)
+        };
+    }
+    // Fonction pour calculer le niveau d'une espèce basé sur le nombre de captures
+    function calculateSpeciesLevel(captureCount) {
+        if (captureCount <= 0) return 1;
+        
+        // Courbe de progression : plus difficile de monter de niveau
+        // Niveau 2: 5 captures, Niveau 3: 15 captures, Niveau 4: 30 captures, etc.
+        // Formule: level = floor(sqrt(captures / 2.5) + 1)
+        const level = Math.floor(Math.sqrt(captureCount / 2.5) + 1);
+        return Math.min(level, 50); // Plafonné à 50
+    }
+    
+    // Fonction pour mettre à jour le niveau d'une espèce
+    function updateSpeciesLevel(emoji) {
+        if (!gameState.progress.speciesLevels) {
+            gameState.progress.speciesLevels = {};
+        }
+        
+        const speciesStats = gameState.progress.speciesStats || {};
+        const captureCount = speciesStats[emoji]?.count || 0;
+        const newLevel = calculateSpeciesLevel(captureCount);
+        const oldLevel = gameState.progress.speciesLevels[emoji] || 1;
+        
+        if (newLevel > oldLevel) {
+            gameState.progress.speciesLevels[emoji] = newLevel;
+            
+            // Sauvegarder immédiatement le nouveau niveau
+            saveProgress();
+            
+            // Afficher une notification de montée de niveau si le jeu est en cours
+            if (gameState.timerEnabled && newLevel > 1) {
+                const speciesNames = {
+                    '🦐': 'Crevette', '🐠': 'Poisson Tropical', '🐡': 'Poisson Ballon',
+                    '🐟': 'Poisson Commun', '🦑': 'Calmar', '🐙': 'Pieuvre',
+                    '🐋': 'Baleine', '🪼': 'Méduse', '🐉': 'Dragon',
+                    '🧜‍♂️': 'Sirène', '🧜‍♀️': 'Sirène', '🦈': 'Requin',
+                    '🐢': 'Tortue', '🐚': 'Coquillage', '🦀': 'Crabe',
+                    '🐊': 'Crocodile', '🦭': 'Phoque', '🐧': 'Pingouin',
+                    '🐳': 'Baleine', '🦞': 'Homard'
+                };
+                
+                const speciesName = speciesNames[emoji] || 'Espèce Inconnue';
+                showUnlockToast('⭐', `${speciesName} niveau ${newLevel} !`);
+            }
+            
+            return true; // Niveau augmenté
+        }
+        
+        return false; // Pas de changement de niveau
+    }
+    function setupStatsEventListeners() {
+        console.log('setupStatsEventListeners appelée'); // Debug
+        // Utiliser la délégation d'événements pour s'assurer que le bouton fonctionne
+        document.addEventListener('click', (e) => {
+            if (e.target && e.target.id === 'fishing-stats-button') {
+                e.stopPropagation();
+                console.log('Clic sur bouton stats détecté via délégation'); // Debug
+                showStatsWindow();
+            }
+        });
+        
+        // Bouton pour ouvrir la fenêtre de stats (méthode directe en backup)
+        const statsButton = document.getElementById('fishing-stats-button');
+        console.log('Bouton stats trouvé:', statsButton); // Debug
+        if (statsButton) {
+            statsButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                console.log('Clic sur bouton stats détecté'); // Debug
+                showStatsWindow();
+            });
+        } else {
+            console.error('Bouton stats non trouvé!'); // Debug
+        }
+
+        // Bouton pour fermer la fenêtre de stats
+        const statsCloseButton = document.getElementById('fishing-stats-close');
+        if (statsCloseButton) {
+            statsCloseButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideStatsWindow();
+            });
+        }
+
+        // Fermer la fenêtre en cliquant à l'extérieur
+        const statsWindow = document.getElementById('fishing-stats-window');
+        if (statsWindow) {
+            statsWindow.addEventListener('click', (e) => {
+                if (e.target === statsWindow) {
+                    hideStatsWindow();
+                }
+            });
+        }
+
+        // Fermer avec la touche Échap
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const statsWindow = document.getElementById('fishing-stats-window');
+                if (statsWindow && statsWindow.style.display === 'block') {
+                    hideStatsWindow();
+                }
+            }
+        });
+    }
+
     // Génère une prévisualisation de trajectoire
     function updateCastPreview(){
         const canvas = document.getElementById('fishing-canvas');
@@ -6445,12 +7436,30 @@
             return JSON.parse(decodeURIComponent(escape(atob(encoded))));
         } catch (_) { return null; }
     }
+    // Arrondir récursivement toutes les valeurs numériques à 2 décimales
+    function roundNumbersDeep(value) {
+        if (typeof value === 'number' && isFinite(value)) {
+            return Math.round(value * 100) / 100;
+        }
+        if (Array.isArray(value)) {
+            return value.map(v => roundNumbersDeep(v));
+        }
+        if (value && typeof value === 'object') {
+            const out = {};
+            for (const key in value) {
+                if (Object.prototype.hasOwnProperty.call(value, key)) {
+                    out[key] = roundNumbersDeep(value[key]);
+                }
+            }
+            return out;
+        }
+        return value;
+    }
     function deleteCookie(name) {
         try {
             document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         } catch (_) {}
     }
-
     // Fonction pour créer la fenêtre de gestion des cookies avancée
     function showCookieManager() {
         // Supprimer la fenêtre existante si elle existe
@@ -6464,26 +7473,14 @@
         window.id = 'cookie-manager-window';
         window.style.cssText = `
             position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: linear-gradient(135deg, rgba(15, 42, 107, 0.98), rgba(30, 58, 138, 0.98));
-            color: white;
-            padding: 20px;
-            border-radius: 20px;
-            text-align: center;
-            max-width: 90vw;
-            max-height: 90vh;
-            width: 1200px;
-            font-size: 14px;
-            line-height: 1.6;
-            z-index: 10010;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.1);
-            border: 3px solid rgba(16, 185, 129, 0.3);
-            backdrop-filter: blur(10px);
-            animation: fadeInScale 0.4s ease-out;
-            overflow-y: auto;
+            inset: 0;
+            background: radial-gradient(1200px 600px at 50% 85%, rgba(11,18,40,0.92), rgba(11,18,40,0.86) 30%, rgba(0,0,0,0.7) 70%);
+            z-index: ${ (window.__fishingZCounter||30000) };
+            display: flex;
+            align-items: center;
+            justify-content: center;
         `;
+        registerFishingWindow(window);
 
         // Charger les données du cookie
         const cookieData = getCookie('fishingProgress') || {};
@@ -6800,7 +7797,6 @@
                 </div>
             `;
         }
-
         // Remplir l'onglet Espèces
         function fillSpeciesTab(data) {
             const speciesList = document.getElementById('species-list');
@@ -6978,7 +7974,7 @@
                 const progressData = JSON.parse(progressTextarea.value);
                 const windowData = JSON.parse(windowTextarea.value);
                 
-                setCookie('fishingProgress', progressData, 365);
+                setCookie('fishingProgress', roundNumbersDeep(progressData), 365);
                 setCookie('fishingWindowState', windowData, 365);
                 
                 // Recharger la progression dans le jeu
@@ -7006,7 +8002,6 @@
                 showStatus('❌ Erreur JSON: ' + error.message, true);
             }
         });
-
         // Reset progression
         resetProgressBtn.addEventListener('click', () => {
             if (confirm('Êtes-vous sûr de vouloir réinitialiser toute la progression ?')) {
@@ -7106,7 +8101,7 @@
                 
                 // Appliquer immédiatement la réinitialisation
                 gameState.progress = defaultProgress;
-                setCookie('fishingProgress', defaultProgress, 365);
+                setCookie('fishingProgress', roundNumbersDeep(defaultProgress), 365);
                 updateScoreDisplay();
                 updateCaughtFishDisplay();
                 updateTimeAndSeasonDisplay();
@@ -7139,7 +8134,6 @@
                 showStatus('🪟 État de fenêtre réinitialisé et appliqué');
             }
         });
-
         // Exporter les cookies
         exportBtn.addEventListener('click', () => {
             try {
@@ -7182,7 +8176,7 @@
                         if (importData.fishingProgress) {
                             progressTextarea.value = JSON.stringify(importData.fishingProgress, null, 2);
                             // Appliquer immédiatement la progression importée
-                            setCookie('fishingProgress', importData.fishingProgress, 365);
+                            setCookie('fishingProgress', roundNumbersDeep(importData.fishingProgress), 365);
                             gameState.progress = importData.fishingProgress;
                             updateScoreDisplay();
                             updateCaughtFishDisplay();
@@ -7241,11 +8235,41 @@
             e.stopPropagation();
         });
     }
-
     function loadProgress() {
         const def = {
             unlockedSpecies: ['🦐','🐟'], // espèces de départ
-            achievements: { bottomHold40:false, bottomHold60:false, highscore200:false },
+            achievements: { 
+                bottomHold40:false, 
+                bottomHold60:false, 
+                highscore200:false,
+                // Achievements par espèce
+                shrimpMaster: false,      // 100 crevettes
+                tropicalMaster: false,    // 50 poissons tropicaux
+                pufferMaster: false,      // 30 poissons ballons
+                squidMaster: false,       // 25 calmars
+                octopusMaster: false,     // 20 pieuvres
+                whaleMaster: false,       // 10 baleines
+                jellyfishMaster: false,   // 75 méduses
+                dragonMaster: false,      // 5 dragons
+                sirenMaster: false,       // 15 sirènes
+                sharkMaster: false,       // 8 requins
+                turtleMaster: false,      // 12 tortues
+                crabMaster: false,        // 40 crabes
+                crocodileMaster: false,   // 6 crocodiles
+                sealMaster: false,        // 10 phoques
+                penguinMaster: false,     // 8 pingouins
+                lobsterMaster: false,     // 15 homards
+                shellMaster: false,       // 25 coquillages
+                // Achievements de niveau
+                level10Species: false,    // Une espèce niveau 10
+                level20Species: false,    // Une espèce niveau 20
+                level30Species: false,    // Une espèce niveau 30
+                level40Species: false,    // Une espèce niveau 40
+                level50Species: false,    // Une espèce niveau 50
+                multipleLevel10: false,   // 5 espèces niveau 10+
+                multipleLevel20: false,   // 3 espèces niveau 20+
+                allSpeciesLevel5: false  // Toutes les espèces niveau 5+
+            },
             stats: {
                 longestBottomHold: 0,
                 surfaceHoldCumulative: 0, // cumul proche surface (s)
@@ -7295,6 +8319,8 @@
                 transformedCatches: 0
             },
             statsByEmoji: {}, // Compteur de captures par emoji d'espèce
+            speciesStats: {}, // Statistiques détaillées par espèce (count + totalWeight)
+            speciesLevels: {}, // Niveaux par espèce (emoji -> level)
             hats: {
                 unlocked: [],  // emojis de chapeaux débloqués
                 owned: [],     // emojis possédés (attrapés)
@@ -7317,7 +8343,11 @@
         return merged;
     }
     function saveProgress() {
-        setCookie('fishingProgress', gameState.progress, 365);
+        // Arrondir les valeurs numériques avant sauvegarde
+        const rounded = roundNumbersDeep(gameState.progress);
+        setCookie('fishingProgress', rounded, 365);
+        // Garder en mémoire l'objet non arrondi pour le runtime
+        gameState.progress = { ...gameState.progress, ...rounded };
         // Rafraîchir le guide en temps réel si ouvert
         try {
             if (typeof updateGuideLists === 'function') {
@@ -7548,7 +8578,6 @@
             showAchievementDetails(gameState.selectedAchievement);
         }
     }
-
     function showGuide() {
         // Supprimer un ancien guide s'il existe
         const existing = document.querySelector('.fishing-guide-window');
@@ -7585,21 +8614,28 @@
             background: linear-gradient(to right, #f5e6d3 0%, #f5e6d3 49%, #2c1810 49.5%, #f5e6d3 50%, #f5e6d3 100%);
             border-radius: 16px;
             box-shadow: 0 25px 70px rgba(0,0,0,.8), inset 0 0 80px rgba(139,69,19,.15);
-            z-index: 20000;
+            z-index: ${ (window.__fishingZCounter||30000) };
             display: flex;
             flex-direction: column;
             font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif;
             overflow: hidden;
         `;
+        registerFishingWindow(guideWindow);
+        try { makeDraggable(guideWindow); } catch(_) { console.warn('makeDraggable failed for guide'); }
+        try {
+            guideWindow.addEventListener('mousedown', () => bringToFront(guideWindow));
+            const header = guideWindow.querySelector('#guide-header');
+            if (header) header.addEventListener('mousedown', () => bringToFront(guideWindow));
+        } catch(_) {}
         
         guideWindow.innerHTML = `
-            <div id="guide-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 2px solid #8b4513; cursor: move; user-select: none;">
+            <div id="guide-header" class="fishing-game-drag-handle" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px 18px 16px; border-bottom: 2px solid #8b4513; cursor: move; user-select: none; position: relative; z-index: 2; background: #f5e6d3;">
                 <h2 style="margin: 0; font-size: 24px; color: #8b4513;">📖 Guide de Pêche</h2>
                 <button id="guide-close" style="background: none; border: none; color: #8b4513; font-size: 24px; cursor: pointer; padding: 5px;">×</button>
             </div>
             
             <!-- Onglets -->
-            <div style="display: flex; border-bottom: 2px solid #8b4513;">
+            <div style="display: flex; border-bottom: 2px solid #8b4513; margin-top: 4px; position: relative; z-index: 1;">
                 <button id="tab-species" class="guide-tab active" style="flex: 1; padding: 15px; background: #8b4513; color: white; border: none; font-size: 16px; cursor: pointer; font-family: inherit;">
                     🐟 Espèces
                 </button>
@@ -7623,6 +8659,7 @@
                         <div id="species-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
                             <!-- Liste des espèces sera générée ici -->
                         </div>
+                        
                     </div>
                     
                     <div style="flex: 1; padding: 20px; overflow-y: auto;">
@@ -7683,6 +8720,7 @@
                         </div>
                     </div>
                 </div>
+                
             </div>
         `;
         
@@ -7759,10 +8797,8 @@
             if (!fishType || !fishType.unlock) {
                 return { condition: 'Condition inconnue', progress: 0, current: 0, target: 1 };
             }
-            
             const unlock = fishType.unlock;
             const unlockText = fishType.unlockText || 'Condition inconnue';
-            
             // Calculer la progression selon le type de déblocage
             let progress = 0;
             let current = 0;
@@ -8023,6 +9059,7 @@
             }
         }
 
+
         // Fonction pour générer la liste des patterns
         function generatePatternsList() {
             const container = document.getElementById('patterns-list');
@@ -8075,7 +9112,6 @@
                 });
             });
         }
-        
         // Fonction pour afficher les détails d'un pattern
         function showPatternDetails(pattern) {
             const detailsContainer = document.getElementById('pattern-details');
@@ -8137,8 +9173,6 @@
                 </div>
             `;
         }
-
-
         // Fonction pour mettre à jour les listes en temps réel
         let updateGuideListsTimeout;
         function updateGuideLists(immediate = false) {
@@ -8183,6 +9217,7 @@
                     generateAchievementsList();
                 }
                 
+                
                 // Mettre à jour les détails en temps réel
                 updateGuideDetails();
             };
@@ -8208,7 +9243,6 @@
         }
         // Exposer au scope global pour rafraîchissement depuis saveProgress()
         try { window.updateGuideLists = updateGuideLists; } catch(_) { /* noop */ }
-
         // Fonction pour obtenir les informations de déblocage d'un chapeau
         function getHatUnlockInfo(hat) {
             const stats = gameState.progress?.stats || {};
@@ -8621,7 +9655,6 @@
                 counter.textContent = `(${owned} possédés / ${unlocked} débloqués)`;
             }
         }
-
         // Fonction pour générer la liste des achievements
         function generateAchievementsList() {
             const achievementsList = document.getElementById('achievements-list');
@@ -8775,20 +9808,6 @@
                     unlocked: achievements.highscore200 || false
                 },
                 {
-                    key: 'firstDeep',
-                    name: 'Explorateur',
-                    description: 'Visiter les profondeurs',
-                    emoji: '🦑',
-                    detail: 'Vous avez osé descendre dans les profondeurs ! C\'est là que se cachent les espèces les plus rares.',
-                    category: 'Exploration',
-                    perk: '+3% résistance à la tension',
-                    condition: () => (stats.deepVisits || 0) >= 1,
-                    progress: () => Math.min(1, (stats.deepVisits || 0) / 1),
-                    current: () => stats.deepVisits || 0,
-                    target: 1,
-                    unlocked: achievements.firstDeep || false
-                },
-                {
                     key: 'firstSurface',
                     name: 'Surface',
                     description: 'Pêcher en surface',
@@ -8815,6 +9834,206 @@
                     current: () => stats.perfectScores || 0,
                     target: 1,
                     unlocked: achievements.firstPerfect || false
+                },
+                // Achievements de niveau par espèce
+                {
+                    key: 'level10Species',
+                    name: 'Premier Niveau 10',
+                    description: 'Atteindre le niveau 10 avec une espèce',
+                    emoji: '⭐',
+                    detail: 'Félicitations ! Vous avez atteint le niveau 10 avec une espèce. Vos poissons sont maintenant plus forts et plus précieux !',
+                    category: 'Niveaux',
+                    perk: 'Bonus de niveau appliqués',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).some(level => level >= 10);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const maxLevel = Math.max(...Object.values(speciesLevels), 0);
+                        return Math.min(1, maxLevel / 10);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Math.max(...Object.values(speciesLevels), 0);
+                    },
+                    target: 10,
+                    unlocked: achievements.level10Species || false
+                },
+                {
+                    key: 'level20Species',
+                    name: 'Premier Niveau 20',
+                    description: 'Atteindre le niveau 20 avec une espèce',
+                    emoji: '🌟',
+                    detail: 'Impressionnant ! Niveau 20 atteint. Vos poissons de cette espèce sont maintenant exceptionnellement puissants !',
+                    category: 'Niveaux',
+                    perk: 'Bonus de niveau élevés',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).some(level => level >= 20);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const maxLevel = Math.max(...Object.values(speciesLevels), 0);
+                        return Math.min(1, maxLevel / 20);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Math.max(...Object.values(speciesLevels), 0);
+                    },
+                    target: 20,
+                    unlocked: achievements.level20Species || false
+                },
+                {
+                    key: 'level30Species',
+                    name: 'Premier Niveau 30',
+                    description: 'Atteindre le niveau 30 avec une espèce',
+                    emoji: '💫',
+                    detail: 'Extraordinaire ! Niveau 30 atteint. Vous maîtrisez parfaitement cette espèce !',
+                    category: 'Niveaux',
+                    perk: 'Maîtrise complète',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).some(level => level >= 30);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const maxLevel = Math.max(...Object.values(speciesLevels), 0);
+                        return Math.min(1, maxLevel / 30);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Math.max(...Object.values(speciesLevels), 0);
+                    },
+                    target: 30,
+                    unlocked: achievements.level30Species || false
+                },
+                {
+                    key: 'level40Species',
+                    name: 'Premier Niveau 40',
+                    description: 'Atteindre le niveau 40 avec une espèce',
+                    emoji: '🔥',
+                    detail: 'Légendaire ! Niveau 40 atteint. Vous êtes un expert absolu de cette espèce !',
+                    category: 'Niveaux',
+                    perk: 'Expertise légendaire',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).some(level => level >= 40);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const maxLevel = Math.max(...Object.values(speciesLevels), 0);
+                        return Math.min(1, maxLevel / 40);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Math.max(...Object.values(speciesLevels), 0);
+                    },
+                    target: 40,
+                    unlocked: achievements.level40Species || false
+                },
+                {
+                    key: 'level50Species',
+                    name: 'Premier Niveau 50',
+                    description: 'Atteindre le niveau 50 avec une espèce',
+                    emoji: '👑',
+                    detail: 'MYTHIQUE ! Niveau 50 atteint ! Vous êtes le maître absolu de cette espèce !',
+                    category: 'Niveaux',
+                    perk: 'Maîtrise mythique',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).some(level => level >= 50);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const maxLevel = Math.max(...Object.values(speciesLevels), 0);
+                        return Math.min(1, maxLevel / 50);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Math.max(...Object.values(speciesLevels), 0);
+                    },
+                    target: 50,
+                    unlocked: achievements.level50Species || false
+                },
+                {
+                    key: 'multipleLevel10',
+                    name: '5 Espèces Niveau 10+',
+                    description: 'Atteindre le niveau 10 avec 5 espèces différentes',
+                    emoji: '🎖️',
+                    detail: 'Polyvalent ! Vous excellez avec de nombreuses espèces. Votre expertise est remarquable !',
+                    category: 'Niveaux',
+                    perk: 'Expertise polyvalente',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).filter(level => level >= 10).length >= 5;
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const level10Count = Object.values(speciesLevels).filter(level => level >= 10).length;
+                        return Math.min(1, level10Count / 5);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).filter(level => level >= 10).length;
+                    },
+                    target: 5,
+                    unlocked: achievements.multipleLevel10 || false
+                },
+                {
+                    key: 'multipleLevel20',
+                    name: '3 Espèces Niveau 20+',
+                    description: 'Atteindre le niveau 20 avec 3 espèces différentes',
+                    emoji: '🏆',
+                    detail: 'Maître ! Vous excellez avec plusieurs espèces à un niveau élevé. Votre maîtrise est exceptionnelle !',
+                    category: 'Niveaux',
+                    perk: 'Maîtrise multiple',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).filter(level => level >= 20).length >= 3;
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const level20Count = Object.values(speciesLevels).filter(level => level >= 20).length;
+                        return Math.min(1, level20Count / 3);
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        return Object.values(speciesLevels).filter(level => level >= 20).length;
+                    },
+                    target: 3,
+                    unlocked: achievements.multipleLevel20 || false
+                },
+                {
+                    key: 'allSpeciesLevel5',
+                    name: 'Toutes les Espèces Niveau 5+',
+                    description: 'Atteindre le niveau 5 avec toutes les espèces débloquées',
+                    emoji: '🌈',
+                    detail: 'Universel ! Vous maîtrisez toutes les espèces débloquées. Vous êtes un pêcheur complet !',
+                    category: 'Niveaux',
+                    perk: 'Maîtrise universelle',
+                    condition: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const unlockedSpecies = gameState.progress?.unlockedSpecies || [];
+                        return unlockedSpecies.length > 0 && unlockedSpecies.every(emoji => (speciesLevels[emoji] || 1) >= 5);
+                    },
+                    progress: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const unlockedSpecies = gameState.progress?.unlockedSpecies || [];
+                        if (unlockedSpecies.length === 0) return 0;
+                        const level5Count = unlockedSpecies.filter(emoji => (speciesLevels[emoji] || 1) >= 5).length;
+                        return level5Count / unlockedSpecies.length;
+                    },
+                    current: () => {
+                        const speciesLevels = gameState.progress?.speciesLevels || {};
+                        const unlockedSpecies = gameState.progress?.unlockedSpecies || [];
+                        return unlockedSpecies.filter(emoji => (speciesLevels[emoji] || 1) >= 5).length;
+                    },
+                    target: () => {
+                        const unlockedSpecies = gameState.progress?.unlockedSpecies || [];
+                        return unlockedSpecies.length;
+                    },
+                    unlocked: achievements.allSpeciesLevel5 || false
                 }
             ];
             
@@ -8881,7 +10100,6 @@
                 achievementsList.appendChild(item);
             });
         }
-        
         // Fonction pour afficher les détails d'un achievement
         function showAchievementDetails(achievement) {
             const detailsContainer = document.getElementById('achievement-details');
@@ -9057,7 +10275,6 @@
                     try { return JSON.stringify(unlock); } catch { return 'Condition inconnue'; }
             }
         }
-
         // Fonction pour afficher les détails d'un chapeau
         function showHatDetails(emoji) {
             const detailsDiv = document.getElementById('hats-details');
@@ -9174,7 +10391,6 @@
                 }
             }
         }
-
         // Fonction pour afficher les détails d'une espèce
         window.showSpeciesDetails = function(emoji) {
             console.log('[Guide] showSpeciesDetails appelée pour:', emoji);
@@ -9220,7 +10436,6 @@
                 'any':       { label: 'Any',       desc: 'Aucun pattern spécial requis (léger bonus quelles que soient les positions).' }
             };
             const patternData = patternInfoMap[fishType.baitPattern] || { label: 'Aucun', desc: 'Aucun pattern spécial.' };
-            
             detailsDiv.innerHTML = `
                 <div style="text-align: center; margin-bottom: 20px;">
                     <div style="font-size: 64px; margin-bottom: 8px;">${isUnlocked ? fishType.emoji : '❔'}</div>
@@ -9273,12 +10488,20 @@
                 </div>
                 
                 <!-- Conseils de capture -->
-                <div style="background: rgba(139,69,19,0.08); padding: 15px; border-radius: 8px;">
+                <div style="background: rgba(139,69,19,0.08); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                     <h3 style="margin: 0 0 12px 0; color: #8b4513; font-size: 16px;">💡 Conseils de Capture</h3>
                     <div style="font-size: 13px; line-height: 1.5; color: #666;">
                         ${isUnlocked ? getCaptureTips(fishType) : 'Informations verrouillées - Débloquez cette espèce pour voir les conseils de capture'}
                     </div>
                 </div>
+                
+                ${isUnlocked ? `
+                    <!-- Informations de niveau d'espèce -->
+                    <div style="background: rgba(139,69,19,0.08); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <h3 style="margin: 0 0 12px 0; color: #8b4513; font-size: 16px;">⭐ Progression de Niveau</h3>
+                        ${getSpeciesLevelInfo(emoji)}
+                    </div>
+                ` : ''}
                 
                 ${!isUnlocked ? `
                     <!-- Informations de déblocage -->
@@ -9298,6 +10521,90 @@
             `;
         }
         
+        // Fonction pour générer les informations de niveau d'espèce
+        function getSpeciesLevelInfo(emoji) {
+            const speciesStats = gameState.progress?.speciesStats || {};
+            const speciesLevels = gameState.progress?.speciesLevels || {};
+            
+            const stats = speciesStats[emoji] || { count: 0, totalWeight: 0 };
+            const level = speciesLevels[emoji] || 1;
+            const levelBonuses = getSpeciesLevelBonuses(emoji, level);
+            
+            // Calculer le prochain niveau
+            const nextLevel = level + 1;
+            const capturesForNextLevel = Math.ceil(Math.pow(nextLevel - 1, 2) * 2.5);
+            const capturesNeeded = Math.max(0, capturesForNextLevel - stats.count);
+            const progressToNext = stats.count > 0 ? Math.min(1, (stats.count - Math.ceil(Math.pow(level - 1, 2) * 2.5)) / (capturesForNextLevel - Math.ceil(Math.pow(level - 1, 2) * 2.5))) : 0;
+            
+            // Couleur du niveau
+            let levelColor = '#60a5fa';
+            if (level >= 20) levelColor = '#fbbf24';
+            else if (level >= 10) levelColor = '#a78bfa';
+            else if (level >= 5) levelColor = '#34d399';
+            
+            return `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: bold; color: #8b4513; margin-bottom: 4px;">
+                            Niveau Actuel: <span style="color: ${levelColor};">${level}</span>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            ${stats.count} captures • ${stats.totalWeight.toFixed(1)}kg total
+                        </div>
+                    </div>
+                    <div style="background: ${levelColor}; color: white; padding: 6px 12px; border-radius: 15px; font-size: 14px; font-weight: bold;">
+                        Niveau ${level}
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="font-size: 12px; color: #666;">Progression vers niveau ${nextLevel}</span>
+                        <span style="font-size: 12px; color: #8b4513; font-weight: bold;">${capturesNeeded} captures restantes</span>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.1); border-radius: 4px; height: 8px; overflow: hidden;">
+                        <div style="background: linear-gradient(90deg, #60a5fa, #34d399); height: 100%; width: ${Math.round(progressToNext * 100)}%; transition: width 0.3s;"></div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <h4 style="margin: 0 0 8px 0; color: #8b4513; font-size: 14px;">📊 Statistiques</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                        <div style="background: rgba(96, 165, 250, 0.1); padding: 8px; border-radius: 4px; text-align: center;">
+                            <div style="color: #60a5fa; font-weight: bold; font-size: 16px;">${stats.count}</div>
+                            <div style="color: #666;">Captures</div>
+                        </div>
+                        <div style="background: rgba(52, 211, 153, 0.1); padding: 8px; border-radius: 4px; text-align: center;">
+                            <div style="color: #34d399; font-weight: bold; font-size: 16px;">${stats.totalWeight.toFixed(1)}kg</div>
+                            <div style="color: #666;">Poids total</div>
+                        </div>
+                    </div>
+                    <div style="background: rgba(244, 114, 182, 0.1); padding: 8px; border-radius: 4px; text-align: center; margin-top: 8px;">
+                        <div style="color: #f472b6; font-weight: bold; font-size: 16px;">${stats.count > 0 ? (stats.totalWeight / stats.count).toFixed(1) : '0.0'}kg</div>
+                        <div style="color: #666;">Poids moyen</div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 style="margin: 0 0 8px 0; color: #8b4513; font-size: 14px;">⚡ Bonus de Niveau</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 12px;">
+                        <div style="background: rgba(52, 211, 153, 0.1); padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #34d399;">
+                            <div style="color: #34d399; font-weight: bold; font-size: 14px;">+${Math.round((levelBonuses.sizeMultiplier - 1) * 100)}%</div>
+                            <div style="color: #666;">Taille</div>
+                        </div>
+                        <div style="background: rgba(96, 165, 250, 0.1); padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #60a5fa;">
+                            <div style="color: #60a5fa; font-weight: bold; font-size: 14px;">+${Math.round((levelBonuses.staminaMultiplier - 1) * 100)}%</div>
+                            <div style="color: #666;">Stamina</div>
+                        </div>
+                        <div style="background: rgba(244, 114, 182, 0.1); padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #f472b6;">
+                            <div style="color: #f472b6; font-weight: bold; font-size: 14px;">+${Math.round((levelBonuses.pointsMultiplier - 1) * 100)}%</div>
+                            <div style="color: #666;">Points</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         // Fonction pour générer des conseils de capture basés sur les caractéristiques
         function getCaptureTips(fishType) {
             const tips = [];
@@ -9363,6 +10670,7 @@
         if (achievementsTab) {
             achievementsTab.addEventListener('click', () => switchGuideTab('achievements'));
         }
+        
 
         // Bouton de fermeture
         const closeBtn = document.getElementById('guide-close');
@@ -9407,7 +10715,6 @@
     function isProgressionEnabled() {
         return gameState.timerEnabled || (window.testToolsState && window.testToolsState.enableProgressionWithoutTimer);
     }
-
     // Fenêtre d'outils de test déplaçable
     function showTestTools() {
         // Supprimer une ancienne fenêtre de test si elle existe
@@ -9417,8 +10724,19 @@
             return; // Toggle: si elle existe déjà, on la ferme
         }
         
-        // État des options de test
+        // État des options de test - charger depuis localStorage
         if (!window.testToolsState) {
+            const savedState = localStorage.getItem('fishingTestToolsState');
+            if (savedState) {
+                try {
+                    window.testToolsState = JSON.parse(savedState);
+                } catch (e) {
+                    console.warn('Erreur lors du chargement de l\'état des outils:', e);
+                    window.testToolsState = {};
+                }
+            }
+            
+            // Valeurs par défaut si pas de sauvegarde ou valeurs manquantes
             window.testToolsState = {
                 autoAttach: false,
                 unbreakableLine: false,
@@ -9426,26 +10744,39 @@
                 tensionMultiplier: 1.0,
                 lineResistance: 1.0,
                 autoSpawnEnabled: true,
-                enableProgressionWithoutTimer: false
+                enableProgressionWithoutTimer: false,
+                ...window.testToolsState
             };
         }
         
         const testWindow = document.createElement('div');
         testWindow.className = 'fishing-test-window';
+        
+        // Charger la position sauvegardée
+        const savedPosition = localStorage.getItem('fishingTestToolsPosition');
+        let position = { top: 100, right: 20, width: 320 };
+        if (savedPosition) {
+            try {
+                position = { ...position, ...JSON.parse(savedPosition) };
+            } catch (e) {
+                console.warn('Erreur lors du chargement de la position des outils:', e);
+            }
+        }
+        
         testWindow.style.cssText = `
             position: fixed;
-            top: 100px;
-            right: 20px;
-            width: 320px;
+            top: ${position.top}px;
+            right: ${position.right}px;
+            width: ${position.width}px;
             background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
             border-radius: 12px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.5), 0 0 0 2px rgba(59, 130, 246, 0.3);
-            z-index: 25000;
+            z-index: ${ (window.__fishingZCounter||30000) };
             font-family: 'Concert One', 'Segoe UI', system-ui, sans-serif;
             color: white;
             overflow: hidden;
         `;
-        
+        try { registerFishingWindow(testWindow); } catch(_) {}
         testWindow.innerHTML = `
             <div id="test-header" style="
                 display: flex; 
@@ -9890,6 +11221,7 @@
             autoAttachCheckbox.addEventListener('change', (e) => {
                 window.testToolsState.autoAttach = e.target.checked;
                 console.log('[Test] Auto-attach:', window.testToolsState.autoAttach ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+                saveTestToolsState();
             });
         }
         
@@ -9898,6 +11230,7 @@
             unbreakableCheckbox.addEventListener('change', (e) => {
                 window.testToolsState.unbreakableLine = e.target.checked;
                 console.log('[Test] Ligne incassable:', window.testToolsState.unbreakableLine ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+                saveTestToolsState();
             });
         }
         
@@ -9906,6 +11239,7 @@
             enableProgressionCheckbox.addEventListener('change', (e) => {
                 window.testToolsState.enableProgressionWithoutTimer = e.target.checked;
                 console.log('[Test] Progression sans chrono:', window.testToolsState.enableProgressionWithoutTimer ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+                saveTestToolsState();
             });
         }
         
@@ -9916,6 +11250,7 @@
                 window.testToolsState.weightMultiplier = value;
                 if (weightValue) weightValue.textContent = value.toFixed(1) + 'x';
                 console.log('[Test] Multiplicateur de poids:', value.toFixed(1) + 'x');
+                saveTestToolsState();
             });
         }
         
@@ -9938,16 +11273,7 @@
                 // Mettre à jour l'affichage
                 if (totalWeightValue) totalWeightValue.textContent = valueKg.toFixed(0) + ' kg';
                 
-                // Mettre à jour l'affichage du poids dans le jeu
-                const weightElement = document.getElementById('fishing-weight');
-                if (weightElement) {
-                    const weight = gameState.totalWeight;
-                    if (weight >= 1000) {
-                        weightElement.textContent = `${(weight / 1000).toFixed(1)}kg`;
-                    } else {
-                        weightElement.textContent = `${Math.round(weight)}g`;
-                    }
-                }
+                // Affichage du poids supprimé de la barre d'UI
                 
                 // Vérifier les déblocages
                 checkUnlocks();
@@ -9968,6 +11294,7 @@
                 window.testToolsState.tensionMultiplier = value;
                 if (tensionValue) tensionValue.textContent = value.toFixed(1) + 'x';
                 console.log('[Test] Multiplicateur de tension:', value.toFixed(1) + 'x');
+                saveTestToolsState();
             });
         }
         
@@ -9978,6 +11305,7 @@
                 window.testToolsState.lineResistance = value;
                 if (lineResistanceValue) lineResistanceValue.textContent = value.toFixed(1) + 'x';
                 console.log('[Test] Résistance de la ligne:', value.toFixed(1) + 'x');
+                saveTestToolsState();
             });
         }
         
@@ -9988,7 +11316,6 @@
                 if (spawnCountValue) spawnCountValue.textContent = value.toString();
             });
         }
-        
         if (spawnButton) {
             spawnButton.addEventListener('click', () => {
                 const selectedEmoji = spawnSpeciesSelect ? spawnSpeciesSelect.value : null;
@@ -10101,6 +11428,7 @@
                     toggleAutoSpawnBtn.style.borderColor = '#fb923c';
                     console.log('[Test] Spawn automatique: DÉSACTIVÉ');
                 }
+                saveTestToolsState();
             });
         }
         
@@ -10115,9 +11443,28 @@
             });
         }
         
+        // Fonction de sauvegarde de l'état et de la position
+        const saveTestToolsState = () => {
+            try {
+                // Sauvegarder l'état des valeurs
+                localStorage.setItem('fishingTestToolsState', JSON.stringify(window.testToolsState));
+                
+                // Sauvegarder la position et la taille
+                const rect = testWindow.getBoundingClientRect();
+                const position = {
+                    top: rect.top,
+                    right: window.innerWidth - rect.right,
+                    width: rect.width
+                };
+                localStorage.setItem('fishingTestToolsPosition', JSON.stringify(position));
+            } catch (e) {
+                console.warn('Erreur lors de la sauvegarde des outils:', e);
+            }
+        };
         // Bouton de fermeture
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
+                saveTestToolsState();
                 testWindow.remove();
             });
         }
@@ -10143,7 +11490,6 @@
         const lerpRate = 8 * deltaSec; // vitesse d'approche
         gameState.rodAngle = (1 - lerpRate) * (gameState.rodAngle || -0.45) + lerpRate * target + sway;
     }
-
     // Évalue une règle de déblocage du catalogue contre les statistiques courantes
     function isUnlockedBySpec(unlockSpec, st, context) {
         if (!unlockSpec || typeof unlockSpec !== 'object') return false;
@@ -10343,6 +11689,43 @@
         unlockAchievement('firstSurface', (st.surfaceHoldCumulative || 0) >= 10, 'Surface');
         unlockAchievement('firstPerfect', (st.perfectScores || 0) >= 1, 'Parfait');
         
+        // Vérifier les achievements par espèce
+        const speciesStats = gameState.progress?.speciesStats || {};
+        unlockAchievement('shrimpMaster', (speciesStats['🦐']?.count || 0) >= 100, 'Maître des Crevettes');
+        unlockAchievement('tropicalMaster', (speciesStats['🐠']?.count || 0) >= 50, 'Maître des Poissons Tropicaux');
+        unlockAchievement('pufferMaster', (speciesStats['🐡']?.count || 0) >= 30, 'Maître des Poissons Ballons');
+        unlockAchievement('squidMaster', (speciesStats['🦑']?.count || 0) >= 25, 'Maître des Calmars');
+        unlockAchievement('octopusMaster', (speciesStats['🐙']?.count || 0) >= 20, 'Maître des Pieuvres');
+        unlockAchievement('whaleMaster', (speciesStats['🐋']?.count || 0) >= 10, 'Maître des Baleines');
+        unlockAchievement('jellyfishMaster', (speciesStats['🪼']?.count || 0) >= 75, 'Maître des Méduses');
+        unlockAchievement('dragonMaster', (speciesStats['🐉']?.count || 0) >= 5, 'Maître des Dragons');
+        unlockAchievement('sirenMaster', (speciesStats['🧜‍♂️']?.count || 0) >= 15 || (speciesStats['🧜‍♀️']?.count || 0) >= 15, 'Maître des Sirènes');
+        unlockAchievement('sharkMaster', (speciesStats['🦈']?.count || 0) >= 8, 'Maître des Requins');
+        unlockAchievement('turtleMaster', (speciesStats['🐢']?.count || 0) >= 12, 'Maître des Tortues');
+        unlockAchievement('crabMaster', (speciesStats['🦀']?.count || 0) >= 40, 'Maître des Crabes');
+        unlockAchievement('crocodileMaster', (speciesStats['🐊']?.count || 0) >= 6, 'Maître des Crocodiles');
+        unlockAchievement('sealMaster', (speciesStats['🦭']?.count || 0) >= 10, 'Maître des Phoques');
+        unlockAchievement('penguinMaster', (speciesStats['🐧']?.count || 0) >= 8, 'Maître des Pingouins');
+        unlockAchievement('lobsterMaster', (speciesStats['🦞']?.count || 0) >= 15, 'Maître des Homards');
+        unlockAchievement('shellMaster', (speciesStats['🐚']?.count || 0) >= 25, 'Maître des Coquillages');
+        
+        // Vérifier les achievements de niveau
+        const speciesLevels = gameState.progress?.speciesLevels || {};
+        const levelValues = Object.values(speciesLevels);
+        
+        unlockAchievement('level10Species', levelValues.some(level => level >= 10), 'Premier Niveau 10');
+        unlockAchievement('level20Species', levelValues.some(level => level >= 20), 'Premier Niveau 20');
+        unlockAchievement('level30Species', levelValues.some(level => level >= 30), 'Premier Niveau 30');
+        unlockAchievement('level40Species', levelValues.some(level => level >= 40), 'Premier Niveau 40');
+        unlockAchievement('level50Species', levelValues.some(level => level >= 50), 'Premier Niveau 50');
+        unlockAchievement('multipleLevel10', levelValues.filter(level => level >= 10).length >= 5, '5 Espèces Niveau 10+');
+        unlockAchievement('multipleLevel20', levelValues.filter(level => level >= 20).length >= 3, '3 Espèces Niveau 20+');
+        
+        // Vérifier si toutes les espèces débloquées sont niveau 5+
+        const unlockedSpecies = gameState.progress?.unlockedSpecies || [];
+        const allSpeciesLevel5 = unlockedSpecies.length > 0 && unlockedSpecies.every(emoji => (speciesLevels[emoji] || 1) >= 5);
+        unlockAchievement('allSpeciesLevel5', allSpeciesLevel5, 'Toutes les Espèces Niveau 5+');
+        
         // Mettre à jour les listes du guide en temps réel
         if (typeof updateGuideLists === 'function') {
             updateGuideLists();
@@ -10405,7 +11788,6 @@
             spawnFloatingHat(emoji);
         }
     }
-    
     // Fonction pour tenter de spawner immédiatement une nouvelle espèce débloquée
     function trySpawnNewSpecies(emoji) {
         const canvas = document.getElementById('fishing-canvas');

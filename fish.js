@@ -6,7 +6,7 @@ window.FISH_CATALOG = {
     types: [
         { 
             emoji: '🦐', name: 'Crevette',
-            sizeRange: [8, 12], speedRange: [1.5, 2.2], 
+            sizeRange: [8, 12], speedRange: [1.0, 1.5], 
             pointsPerSize: 0.8, basePoints: 5,
             staminaRange: [30, 50], depthRange: [0.05, 0.25],
             biteAffinityRange: [0.5, 0.7], aggressionRange: [0.3, 0.5],
@@ -54,7 +54,7 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🦑', name: 'Calmar',
-            sizeRange: [18, 26], speedRange: [1.8, 2.5], 
+            sizeRange: [18, 26], speedRange: [1.8, 2.0], 
             pointsPerSize: 1.8, basePoints: 20,
             staminaRange: [70, 100], depthRange: [0.25, 0.5],
             biteAffinityRange: [0.25, 0.45], aggressionRange: [0.6, 0.8],
@@ -78,9 +78,9 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🐋', name: 'Baleine',
-            sizeRange: [35, 50], speedRange: [0.4, 0.8], 
+            sizeRange: [30, 60], speedRange: [0.4, 0.8], 
             pointsPerSize: 3.5, basePoints: 50,
-            staminaRange: [150, 220], depthRange: [0.6, 0.85],
+            staminaRange: [150, 220], depthRange: [0.9, 0.95],
             biteAffinityRange: [0.15, 0.3], aggressionRange: [0.1, 0.3],
             flashDuration: [2.5, 3.5],
             baitPattern: 'complete',
@@ -92,7 +92,7 @@ window.FISH_CATALOG = {
             emoji: '🪼', name: 'Méduse',
             sizeRange: [10, 16], speedRange: [0.5, 0.9], 
             pointsPerSize: 0.5, basePoints: 3,
-            staminaRange: [20, 40], depthRange: [0.05, 0.2],
+            staminaRange: [20, 40], depthRange: [0.00, 0.02],
             biteAffinityRange: [0.6, 0.8], aggressionRange: [0.2, 0.3],
             flashDuration: [1.0, 1.5],
             baitPattern: 'au_dessus',
@@ -102,7 +102,7 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🧜‍♀️', name: 'Sirène',
-            sizeRange: [22, 30], speedRange: [1.0, 1.6], 
+            sizeRange: [22, 30], speedRange: [0.2, 1.6], 
             pointsPerSize: 4.0, basePoints: 80,
             staminaRange: [120, 180], depthRange: [0.35, 0.65],
             biteAffinityRange: [0.1, 0.25], aggressionRange: [0.4, 0.7],
@@ -113,9 +113,9 @@ window.FISH_CATALOG = {
             unlock: { type: 'unique_species_at_least', value: 5 }
         },
         { emoji:'👾', name:'Créature Mystérieuse',
-             sizeRange:[18,28], speedRange:[1.6,2.4],
+             sizeRange:[60,120], speedRange:[1.6,2.4],
              pointsPerSize:2.8, basePoints:60,
-             staminaRange:[80,140], depthRange:[0.2,0.8],
+             staminaRange:[80,140], depthRange:[0.9,0.9],
              biteAffinityRange:[0.2,0.4], aggressionRange:[0.5,0.8], 
             flashDuration:[1.5,2.2], baitPattern:'active', spawnWeight: 0.35, unlockText: 'Casser 1500 lignes', unlock: { type: 'lines_broken_at_least', value: 1500 } },
              
@@ -137,7 +137,7 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🦭', name: 'Phoque Curieux',
-            sizeRange: [18,26], speedRange: [1.4,2.0],
+            sizeRange: [18,26], speedRange: [0.8,2.0],
             pointsPerSize: 2.4, basePoints: 45,
             staminaRange: [80,120], depthRange: [0.25,0.55],
             biteAffinityRange: [0.35,0.6], aggressionRange: [0.2,0.5],
@@ -153,7 +153,7 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🐬', name: 'Dauphin',
-            sizeRange: [22,32], speedRange: [1.8,2.6],
+            sizeRange: [22,32], speedRange: [0.0,2.0],
             pointsPerSize: 3.2, basePoints: 65,
             staminaRange: [100,150], depthRange: [0.35,0.6],
             biteAffinityRange: [0.4,0.7], aggressionRange: [0.2,0.5],
@@ -163,7 +163,7 @@ window.FISH_CATALOG = {
             emoji: '🐉', name: 'Dragon Marin',
             sizeRange: [40,60], speedRange: [1.2,2.0],
             pointsPerSize: 4.5, basePoints: 120,
-            staminaRange: [200,280], depthRange: [0.85,0.98],
+            staminaRange: [200,280], depthRange: [0.2,0.98],
             biteAffinityRange: [0.1,0.25], aggressionRange: [0.5,0.8],
             flashDuration: [2.5,3.5], baitPattern: 'deep', spawnWeight: 0.05, unlockText: 'Capturer 10 espèces différentes', unlock: { type: 'unique_species_at_least', value: 10 }
         },
@@ -177,9 +177,9 @@ window.FISH_CATALOG = {
         },
         { 
             emoji: '🦀', name: 'Crabe Colossal',
-            sizeRange: [16,26], speedRange: [0.9,1.3],
+            sizeRange: [16,56], speedRange: [0.2,1.0],
             pointsPerSize: 2.4, basePoints: 48,
-            staminaRange: [110,160], depthRange: [0.45,1.0],
+            staminaRange: [190,250], depthRange: [0.45,1.0],
             biteAffinityRange: [0.25,0.45], aggressionRange: [0.2,0.5],
             flashDuration: [1.8,2.8], baitPattern: 'au_dessous', spawnWeight: 0.5, unlockText: 'Effectuer 250 lancers', unlock: { type: 'casts_at_least', value: 250 }
         },
@@ -203,7 +203,7 @@ window.FISH_CATALOG = {
             emoji: '🥾', name: 'Botte Perdue',
             sizeRange: [14,20], speedRange: [0.2,0.6],
             pointsPerSize: 0.2, basePoints: 0,
-            staminaRange: [10,20], depthRange: [0.6,1.0],
+            staminaRange: [100,200], depthRange: [0.0,0.0],
             biteAffinityRange: [0.0,0.1], aggressionRange: [0,0.1],
             flashDuration: [0.5,1.0], baitPattern: 'au_dessous', spawnWeight: 0.8, unlockText: 'Casser 25 lignes', unlock: { type: 'lines_broken_at_least', value: 25 }
         }
