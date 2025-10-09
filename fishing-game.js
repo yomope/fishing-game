@@ -134,6 +134,40 @@
         GAME_CONFIG.fish.types = window.FISH_CATALOG.types;
     }
 
+    // Calcule une durée de maintien du pattern spécifique à l'espèce (ms),
+    // puis applique une petite variation aléatoire par individu
+    function computeSpeciesPatternHoldMs(fishType) {
+        const pattern = fishType?.baitPattern || 'any';
+        // Base par pattern (ms)
+        const baseByPattern = {
+            'hover': 3000,
+            'still': 3000,
+            'falling': 1500,
+            'moving': 1200,
+            'any': 1000,
+            'devant': 1500,
+            'derriere': 1500,
+            'au_dessus': 1500,
+            'au_dessous': 1500,
+            'active': 1200,
+            'deep': 1800,
+            'complete': 2000,
+            'bottom': 3000
+        };
+        let baseMs = baseByPattern[pattern] ?? 1500;
+        // Ajustements simples par espèce (quand connus par le guide)
+        if (fishType?.emoji === '🐋') baseMs = 5000; // Baleine: 5s annoncées
+        // Plusieurs espèces orientées "immobile" demandent au moins ~3s
+        const threeSecondsSet = new Set(['🦭','🐬','🦞','🦀','🧜‍♂️','🧜']);
+        if (threeSecondsSet.has(fishType?.emoji)) baseMs = Math.max(baseMs, 3000);
+        // Variation individuelle ±15% (uniforme)
+        const variance = 0.15;
+        const factor = 1 - variance + Math.random() * (2 * variance);
+        const withNoise = Math.round(baseMs * factor);
+        // Clamp raisonnable
+        return Math.max(700, Math.min(6000, withNoise));
+    }
+
     // Overlay d'information gameplay pour progression vierge
     function showGameplayInfoOverlay() {
         if (document.getElementById('fishing-gameplay-info')) return;
@@ -3107,6 +3141,30 @@
             } else {
                 drawSingleFish(ctx, fish.x, fish.y, fish.size, emoji, ang);
             }
+	            // Effet visuel quand la stamina est épuisée (poisson libre)
+	            if ((fish.stamina || 0) <= 1) {
+	                try {
+	                    const t = performance.now() * 0.004 + (fish._phase || 0);
+	                    const baseX = fish.x;
+	                    const baseY = fish.y - (fish.size || 20) - 8; // même emplacement que la barre
+	                    const radius = Math.max(8, Math.min(18, (fish.size || 20) * 0.45));
+	                    const ax1 = baseX + Math.cos(t) * radius;
+	                    const ay1 = baseY + Math.sin(t * 1.5) * (radius * 0.6);
+	                    const ax2 = baseX + Math.cos(t + Math.PI) * (radius * 0.8);
+	                    const ay2 = baseY + Math.sin((t + Math.PI) * 1.5) * (radius * 0.5);
+	                    const sc = Math.max(0.8, Math.min(1.4, (fish.size || 20) / 20));
+	                    ctx.save();
+	                    ctx.globalAlpha = 0.85;
+	                    ctx.font = `${Math.round(16 * sc)}px sans-serif`;
+	                    ctx.textAlign = 'center';
+	                    ctx.textBaseline = 'middle';
+	                    ctx.fillText('✨', ax1, ay1);
+	                    ctx.globalAlpha = 0.7;
+	                    ctx.font = `${Math.round(12 * sc)}px sans-serif`;
+	                    ctx.fillText('✨', ax2, ay2);
+	                    ctx.restore();
+	                } catch (_) {}
+	            }
 
             // Visualisation simple de la réalisation du pattern (hors outil quadrants)
             // ❔ pendant le décompte autour du poisson, ‼ une fois atteint 1s cumulée
@@ -3146,7 +3204,7 @@
                         const dist = Math.hypot(ddx, ddy);
                         if (dist <= nearRadius) spent += dt;
                     }
-                    const needed = 2000;
+                    const needed = Math.max(700, Math.min(6000, fish._patternHoldMs || computeSpeciesPatternHoldMs({ baitPattern: fish.baitPattern, emoji: fish.emoji })));
                     const epsilon = 50; // tolérance pour éviter le blocage à 99%
                     // Log progression (%), anti-spam 800ms ou variation >=5%
                     try {
@@ -3319,7 +3377,7 @@
                         const dot = ddx * fx + ddy * fy;
                         if (dot >= 0) msFront += dt; else msBack += dt;
                     }
-                    const needed = 1000;
+                    const needed = Math.max(700, Math.min(6000, fish._patternHoldMs || computeSpeciesPatternHoldMs({ baitPattern: fish.baitPattern, emoji: fish.emoji })));
                     const epsilon = 30; // tolérance anti 99%
                     let activeType = 'unknown';
                     let spent = 0;
@@ -3418,8 +3476,8 @@
         const hookAngle = Math.atan2(hvy, hvx || 0.0001);
         gameState.attachedFish.forEach(att => {
             // Pas d'oscillation: position calée sur l'offset de base autour de l'hameçon
-            const ox = att.baseOffX;
-            const oy = att.baseOffY;
+		const ox = att.baseOffX;
+		const oy = att.baseOffY;
             const x = hx + ox;
             const y = hy + oy;
             // Effet visuel orange/aura et badge ×2 dès qu'un poisson est éligible au bonus pattern
@@ -3441,37 +3499,58 @@
                     const ax2 = x + Math.cos(t + Math.PI) * (radius * 0.8);
                     const ay2 = y + Math.sin(t + Math.PI) * (radius * 0.8);
                     ctx.save();
-                    ctx.globalAlpha = 0.85;
-                    ctx.font = `${Math.round(16 * s)}px sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText('✨', ax1, ay1);
-                    ctx.globalAlpha = 0.7;
-                    ctx.font = `${Math.round(12 * s)}px sans-serif`;
-                    ctx.fillText('✨', ax2, ay2);
+
                     ctx.restore();
                 } catch (_) {}
             } else {
                 drawSingleFish(ctx, x, y, att.fish.size, att.fish.emoji || '🐟', hookAngle);
             }
-            // Barre de stamina au-dessus du poisson
-            const s = Math.max(0, Math.min(1, (att.fish.stamina || 0) / (80 + att.fish.size * 4)));
-            const barW = Math.max(24, att.fish.size * 1.5);
-            const barH = 5;
-            ctx.save();
-            ctx.translate(x, y - att.fish.size - 8);
-            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            ctx.fillRect(-barW/2, -barH/2, barW, barH);
-            const grad = ctx.createLinearGradient(-barW/2, 0, barW/2, 0);
-            grad.addColorStop(0, '#10b981');
-            grad.addColorStop(0.5, '#f59e0b');
-            grad.addColorStop(1, '#ef4444');
-            ctx.fillStyle = grad;
-            ctx.fillRect(-barW/2, -barH/2, barW * s, barH);
-            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(-barW/2, -barH/2, barW, barH);
-            ctx.restore();
+	            // Barre de stamina au-dessus du poisson (cachée si effet d'épuisement actif)
+	            const s = Math.max(0, Math.min(1, (att.fish.stamina || 0) / (80 + att.fish.size * 4)));
+	            const isExhaustedFx = (s <= 0.02 || (att.fish.stamina || 0) <= 1);
+	            if (!isExhaustedFx) {
+	                const barW = Math.max(24, att.fish.size * 1.5);
+	                const barH = 5;
+	                ctx.save();
+	                ctx.translate(x, y - att.fish.size - 8);
+	                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+	                ctx.fillRect(-barW/2, -barH/2, barW, barH);
+	                const grad = ctx.createLinearGradient(-barW/2, 0, barW/2, 0);
+	                grad.addColorStop(0, '#10b981');
+	                grad.addColorStop(0.5, '#f59e0b');
+	                grad.addColorStop(1, '#ef4444');
+	                ctx.fillStyle = grad;
+	                ctx.fillRect(-barW/2, -barH/2, barW * s, barH);
+	                ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+	                ctx.lineWidth = 1;
+	                ctx.strokeRect(-barW/2, -barH/2, barW, barH);
+	                ctx.restore();
+	            }
+
+	            // Effet visuel quand la stamina est épuisée (poisson attaché)
+	            if (s <= 0.02 || (att.fish.stamina || 0) <= 1) {
+	                try {
+	                    const t = performance.now() * 0.004 + (att.phase || 0);
+	                    const baseX = x;
+	                    const baseY = y - att.fish.size - 8; // même emplacement que la barre
+	                    const radius = Math.max(8, Math.min(18, att.fish.size * 0.45));
+	                    const ax1 = baseX + Math.cos(t) * radius;
+	                    const ay1 = baseY + Math.sin(t * 1.5) * (radius * 0.6);
+	                    const ax2 = baseX + Math.cos(t + Math.PI) * (radius * 0.8);
+	                    const ay2 = baseY + Math.sin((t + Math.PI) * 1.5) * (radius * 0.5);
+	                    const sc = Math.max(0.8, Math.min(1.4, att.fish.size / 20));
+	                    ctx.save();
+	                    ctx.globalAlpha = 0.85;
+	                    ctx.font = `${Math.round(16 * sc)}px sans-serif`;
+	                    ctx.textAlign = 'center';
+	                    ctx.textBaseline = 'middle';
+	                    ctx.fillText('✨', ax1, ay1);
+	                    ctx.globalAlpha = 0.7;
+	                    ctx.font = `${Math.round(12 * sc)}px sans-serif`;
+	                    ctx.fillText('✨', ax2, ay2);
+	                    ctx.restore();
+	                } catch (_) {}
+	            }
 
             // Badge ×2 sous le poisson si bonus pattern actif/éligible
             if (showPatternViz) {
@@ -3695,6 +3774,8 @@
                 isAttached: false,
                 escaping: false
             };
+            // Durée de maintien du pattern propre à l'espèce + bruit individuel
+            fish._patternHoldMs = computeSpeciesPatternHoldMs(fishType);
             gameState.fish.push(fish);
             // Log détaillé du spawn du poisson - Informations unifiées
             const speciesInfo = {
@@ -3756,11 +3837,9 @@
                 // Angle de fuite
                 fish.angle = Math.atan2(fish.escapeVy, fish.escapeVx);
                 // L'hameçon ne suit plus le poisson (ligne cassée)
-                // Retirer le poisson s'il sort de l'écran (ou après 2 secondes de fuite)
-                const margin = 100;
-                const escapeTime = (performance.now() - fish.escapeStartTime) / 1000;
-                const shouldRemove = (fish.x < -margin || fish.x > canvas.width + margin || 
-                    fish.y < -margin || fish.y > canvas.height + margin) || escapeTime > 2.0;
+				// Retirer le poisson uniquement lorsqu'il est hors écran (pas de timeout)
+				const offscreenNow = (fish.x < 0 || fish.x > canvas.width || fish.y < 0 || fish.y > canvas.height);
+				const shouldRemove = offscreenNow;
                 
                 if (shouldRemove) {
                     fish.removeMe = true; // Marquer pour suppression (le poisson disparaît)
@@ -4091,6 +4170,9 @@
                         try {
                             targetFish._patternBoostUntil = Date.now() + 5000;
                             targetFish._patternBoostType = detected;
+                            // Appliquer un boost temporaire de biteAffinity (*3) pendant la même fenêtre
+                            targetFish._patternBiteAffinityMultUntil = Date.now() + 5000;
+                            targetFish._patternBiteAffinityMult = 3;
                             // pattern boost log removed
                             // Déclencher une charge immédiate vers l'hameçon
                             targetFish.rushUntil = performance.now() + 1200; // ~1.2s de rush
@@ -4129,6 +4211,11 @@
                 // Nouvelle règle: si le pattern correspond à l'espèce, la morsure est GARANTIE
                 // Les espèces peuvent définir baitPattern parmi: 'devant','derriere','au_dessus','au_dessous','complete','active','deep'
                 let biteProb = underRefusal ? 0 : (fish.biteAffinity || 0.5);
+                // Modificateur bonus: si un pattern vient d'être déclenché, multiplier l'affinité de morsure
+                if (fish._patternBiteAffinityMultUntil && Date.now() < fish._patternBiteAffinityMultUntil) {
+                    const affinityMult = fish._patternBiteAffinityMult || 3;
+                    biteProb *= affinityMult;
+                }
                 let patternGuaranteed = false;
                 if (
                     (baitPattern.type && fish.baitPattern && baitPattern.type === fish.baitPattern) ||
@@ -4241,6 +4328,8 @@
                         // Désactiver tous les effets de pattern/rush une fois accroché
                         fish._patternBoostUntil = 0;
                         fish._patternBoostType = null;
+                        fish._patternBiteAffinityMultUntil = 0;
+                        fish._patternBiteAffinityMult = null;
                         fish.rushUntil = 0;
                         fish.refusedUntil = 0;
                     } else {
@@ -4251,7 +4340,7 @@
                         };
                         // Retirer les bonus pattern de TOUS les poissons dès qu'une morsure est posée
                         if (Array.isArray(gameState.fish)) {
-                            gameState.fish.forEach(f => { f._patternBoostUntil = 0; f._patternBoostType = null; f.rushUntil = 0; });
+                            gameState.fish.forEach(f => { f._patternBoostUntil = 0; f._patternBoostType = null; f._patternBiteAffinityMultUntil = 0; f._patternBiteAffinityMult = null; f.rushUntil = 0; });
                         }
                         fish.flashState = 1; // activer clignotement
                     }
@@ -4667,10 +4756,63 @@
                 // Stamina baisse en opposition (réduite)
                 fish.stamina -= 24 * deltaSec;
             }
-            else {
+			else {
                 // Aucun tirage et pas de rembobinage: stamina récupère doucement (augmentée)
                 fish.stamina += 12 * deltaSec;
             }
+
+			// Panique erratique du poisson accroché: impulsions rapides et imprévisibles
+			// Plus la ligne est proche de sa longueur max et plus la stamina est élevée, plus la panique est forte
+			{
+				const dxLine = gameState.hookPosition.x - gameState.lineOrigin.x;
+				const dyLine = gameState.hookPosition.y - gameState.lineOrigin.y;
+				const distLine = Math.hypot(dxLine, dyLine) || 1;
+				const maxLen = GAME_CONFIG.physics.maxLineLength || distLine;
+				const lineRatio = Math.max(0, Math.min(1, distLine / Math.max(1e-6, maxLen)));
+				const staminaNorm = Math.max(0, Math.min(1, fish.stamina / (80 + fish.size * 4)));
+				// Facteur de panique: sensible à la tension (via ratio), à la stamina et à l'eau
+				const envMul = isUnderWater ? 1.0 : 0.7;
+				const panicFactor = Math.max(0.2, Math.min(1.0, 0.4 * envMul + 0.6 * lineRatio)) * (0.7 + 0.6 * staminaNorm);
+				if (panicFactor > 0.2) {
+					// Base des impulsions proportionnelle à la taille et à la force du poisson (amplitude augmentée)
+					const baseMag = (18 + fish.size * 1.8) * (GAME_CONFIG.physics.fishStrength || 1);
+					// Jitter aléatoire à haute fréquence (direction aléatoire chaque frame)
+					const randAng = Math.random() * Math.PI * 2;
+					const jitterMag = baseMag * (1.2 + 2.0 * panicFactor);
+					gameState.hookVelocity.x += Math.cos(randAng) * jitterMag * deltaSec;
+					gameState.hookVelocity.y += Math.sin(randAng) * jitterMag * deltaSec;
+					// Zigzag le long de la tangente de la ligne (alternance rapide)
+					const nLen = distLine;
+					const nx = nLen > 0 ? (gameState.lineOrigin.x - gameState.hookPosition.x) / nLen : 1;
+					const ny = nLen > 0 ? (gameState.lineOrigin.y - gameState.hookPosition.y) / nLen : 0;
+					const tx = -ny, ty = nx;
+					const tPhase = performance.now() * 0.018 + (att.phase || 0);
+					const zig = (Math.sin(tPhase * 13.0) + Math.cos(tPhase * 9.0)) * 0.5; // -1..1 erratique
+					const zigMag = baseMag * (1.6 + 2.4 * panicFactor);
+					gameState.hookVelocity.x += tx * zig * zigMag * deltaSec;
+					gameState.hookVelocity.y += ty * zig * zigMag * deltaSec;
+					// Traction supplémentaire dans le sens d'éloignement de l'origine (le poisson entraîne l'hameçon)
+					const burst = Math.max(0, Math.sin(tPhase * 5.3)); // 0..1
+					const pullMag = baseMag * (1.8 + 2.8 * panicFactor) * burst;
+					gameState.hookVelocity.x -= nx * pullMag * deltaSec;
+					gameState.hookVelocity.y -= ny * pullMag * deltaSec;
+					// Objectif: se rapprocher du bord gauche de l'écran (le poisson "fuit" vers la gauche)
+					try {
+						const canvasEl = document.getElementById('fishing-canvas');
+						const leftGoalX = -64; // viser hors écran à gauche
+						const hxNow = gameState.hookPosition.x;
+						if (canvasEl && hxNow > leftGoalX) {
+							const toLeft = Math.max(0, hxNow - leftGoalX);
+							const leftBase = (28 + fish.size * 1.8) * (GAME_CONFIG.physics.fishStrength || 1);
+							const leftBias = (0.6 + 0.8 * staminaNorm) * (0.4 + 0.8 * lineRatio) * (isUnderWater ? 1.0 : 0.6);
+							// Atténuation légère avec la distance à la cible
+							const falloff = Math.max(0.4, Math.min(1, toLeft / (canvasEl.width * 0.7)));
+							const leftPull = leftBase * leftBias * falloff * 1.25;
+							gameState.hookVelocity.x -= leftPull * deltaSec;
+						}
+					} catch(_) {}
+				}
+			}
 
             // Contraintes stamina
             const maxStamina = 80 + fish.size * 4;
@@ -4730,18 +4872,32 @@
         gameState.hookPrevPosition.x = gameState.hookPosition.x;
         gameState.hookPrevPosition.y = gameState.hookPosition.y;
 
-        // Longueur de ligne et contrainte
-        const dx = gameState.hookPosition.x - gameState.lineOrigin.x;
-        const dy = gameState.hookPosition.y - gameState.lineOrigin.y;
-        const dist = Math.hypot(dx, dy);
-        const maxLen = GAME_CONFIG.physics.maxLineLength;
-        if (dist > maxLen){
-            const ratio = maxLen / Math.max(1e-6, dist);
-            gameState.hookPosition.x = gameState.lineOrigin.x + dx * ratio;
-            gameState.hookPosition.y = gameState.lineOrigin.y + dy * ratio;
-            gameState.hookVelocity.x *= 0.6;
-            gameState.hookVelocity.y *= 0.6;
-        }
+		// Longueur de ligne et contrainte (avec extension dynamique sous traction du poisson)
+		const dx = gameState.hookPosition.x - gameState.lineOrigin.x;
+		const dy = gameState.hookPosition.y - gameState.lineOrigin.y;
+		const dist = Math.hypot(dx, dy);
+		const baseMaxLen = GAME_CONFIG.physics.maxLineLength;
+		let effectiveMaxLen = baseMaxLen;
+		if (gameState.attachedFish.length){
+			const att = gameState.attachedFish[0];
+			const fish = att.fish;
+			const staminaNorm = Math.max(0, Math.min(1, fish.stamina / (80 + fish.size * 4)));
+			const pullActive = fish.stamina > 1 && (Math.sin(gameState.struggleTime * (1 + fish.speed*0.3)) > 0.2 || (gameState.lineTension > 0.3));
+			const tensionNow = Math.max(0, Math.min(1, gameState.lineTension || 0));
+			// Facteur d'extension: plus de stamina/tension et tirage actif => plus d'allongement
+			const stretchFactor = Math.min(1, (pullActive ? 1.0 : 0.6) * (0.2 + 0.8 * staminaNorm) * (0.2 + 0.9 * tensionNow));
+			const maxStretchPx = Math.min(220, 40 + fish.size * 2.4);
+			effectiveMaxLen = baseMaxLen + maxStretchPx * stretchFactor;
+		}
+		if (dist > effectiveMaxLen){
+			const ratio = effectiveMaxLen / Math.max(1e-6, dist);
+			gameState.hookPosition.x = gameState.lineOrigin.x + dx * ratio;
+			gameState.hookPosition.y = gameState.lineOrigin.y + dy * ratio;
+			// Réduire l'amortissement quand c'est le poisson qui étire la ligne, pour qu'il entraîne plus l'hameçon
+			const damping = (gameState.attachedFish.length ? 0.85 : 0.6);
+			gameState.hookVelocity.x *= damping;
+			gameState.hookVelocity.y *= damping;
+		}
         // Direction de la ligne
         const lx = (dist > 0 ? dx / dist : 1);
         const ly = (dist > 0 ? dy / dist : 0);
@@ -4798,8 +4954,19 @@
                 targetTension = Math.max(0.05, targetTension - 0.15);
             }
             
-            // Bonus si proche de la longueur max
-            if (dist > maxLen * 0.95) targetTension += 0.12;
+		// Bonus si proche de la longueur max (tenir compte de l'extension dynamique)
+		const baseMaxLenForBonus = GAME_CONFIG.physics.maxLineLength;
+		let effectiveMaxLenForBonus = baseMaxLenForBonus;
+		if (gameState.attachedFish.length){
+			const f2 = gameState.attachedFish[0].fish;
+			const s2 = Math.max(0, Math.min(1, f2.stamina / (80 + f2.size * 4)));
+			const pullActive2 = f2.stamina > 1 && (Math.sin(gameState.struggleTime * (1 + f2.speed*0.3)) > 0.2 || (gameState.lineTension > 0.3));
+			const tNow2 = Math.max(0, Math.min(1, gameState.lineTension || 0));
+			const stretchFactor2 = Math.min(1, (pullActive2 ? 1.0 : 0.5) * (0.2 + 0.8 * s2) * (0.2 + 0.8 * tNow2));
+			const maxStretchPx2 = Math.min(120, 20 + f2.size * 1.6);
+			effectiveMaxLenForBonus = baseMaxLenForBonus + maxStretchPx2 * stretchFactor2;
+		}
+		if (dist > effectiveMaxLenForBonus * 0.95) targetTension += 0.12;
             
             // Clamper entre 0 et 1 sans tanh saturant
             targetTension = Math.max(0, Math.min(1, targetTension));
@@ -4854,8 +5021,8 @@
                 if (isUnderWater) targetTension += 0.01 * (hookWeight - 1) * sizeMultiplier;
                 targetTension = Math.max(0.05, targetTension - 0.12);
             }
-            // Bonus si proche de la longueur max
-            if (dist > maxLen * 0.95) targetTension += 0.12;
+			// Bonus si proche de la longueur max
+			if (dist > baseMaxLen * 0.95) targetTension += 0.12;
             // Clamp 0..1
             targetTension = Math.max(0, Math.min(1, targetTension));
             // Lissage identique: montée lente, descente rapide
@@ -4874,7 +5041,68 @@
         
         gameState.lineTension = Math.max(0, Math.min(1, tension));
 
-        // Casse de ligne en fonction de la tension
+		// Casse de ligne si le poisson accroché reste hors écran > 2s
+		if (gameState.attachedFish.length) {
+			const att = gameState.attachedFish[0];
+			const hx = gameState.hookPosition.x;
+			const hy = gameState.hookPosition.y;
+			const fx = hx + (att.baseOffX || 0);
+			const fy = hy + (att.baseOffY || 0);
+			const off = (fx < 0 || fx > canvas.width || fy < 0 || fy > canvas.height);
+			if (off) {
+				if (!gameState.attachedOffscreenSince) gameState.attachedOffscreenSince = performance.now();
+				const elapsed = performance.now() - gameState.attachedOffscreenSince;
+				if (elapsed >= 2000) {
+					// Déclencher une casse de ligne identique à la casse par tension
+					if (gameState.attachedFish.length){
+						const att2 = gameState.attachedFish[0];
+						const escapingFish = att2.fish;
+						// Position de départ de la fuite = dernière position rendue (hameçon + offset)
+						const startX2 = (gameState.hookPosition?.x || 0) + (att2.baseOffX || 0);
+						const startY2 = (gameState.hookPosition?.y || 0) + (att2.baseOffY || 0);
+						escapingFish.x = startX2;
+						escapingFish.y = startY2;
+						escapingFish.escaping = true;
+						escapingFish.escapeStartTime = performance.now();
+						escapingFish.escapeVx = -(200 + Math.random() * 150);
+						escapingFish.escapeVy = 50 + Math.random() * 100;
+						if (typeof window.updateGuideLists === 'function') {
+							window.updateGuideLists(true);
+						}
+					}
+					if (gameState.progress?.stats) {
+						gameState.progress.stats.lineBreaks = (gameState.progress.stats.lineBreaks || 0) + 1;
+						gameState.progress.stats.currentNoBreakStreak = 0;
+						gameState.progress.stats.gameDeaths = (gameState.progress.stats.gameDeaths || 0) + 1;
+						saveProgress();
+					}
+					gameState.attachedFish = [];
+					gameState.reelIntensity = 0;
+					gameState.isReeling = false;
+					gameState.lineTension = 0;
+					gameState.isCasting = false;
+					gameState.lineSnapped = false;
+					gameState.breakAccum = 0;
+					const canvasEl = document.getElementById('fishing-canvas');
+					if (canvasEl) {
+						const rodX = canvasEl.width - 100;
+						const rodY = 88;
+						const originX = rodX - Math.cos(gameState.rodAngle) * GAME_CONFIG.rod.length;
+						const originY = rodY + Math.sin(gameState.rodAngle) * GAME_CONFIG.rod.length;
+						gameState.hookPosition.x = originX;
+						gameState.hookPosition.y = originY;
+						gameState.hookVelocity.x = 0;
+						gameState.hookVelocity.y = 0;
+					}
+					gameState.attachedOffscreenSince = 0;
+					return;
+				}
+			} else {
+				gameState.attachedOffscreenSince = 0;
+			}
+		}
+
+		// Casse de ligne en fonction de la tension
         if (!gameState.breakAccum) gameState.breakAccum = 0;
         const castAge = (performance.now() - (gameState.castStartTs || 0)) / 1000;
         const gracePeriod = castAge < 2.0;
@@ -4921,7 +5149,13 @@
         if (gameState.breakAccum >= 1) {
             // La ligne casse : le poisson s'enfuit
             if (gameState.attachedFish.length){
-                const escapingFish = gameState.attachedFish[0].fish;
+				const att = gameState.attachedFish[0];
+				const escapingFish = att.fish;
+				// Position de départ de la fuite = dernière position rendue du poisson (hameçon + offset)
+				const startX = (gameState.hookPosition?.x || 0) + (att.baseOffX || 0);
+				const startY = (gameState.hookPosition?.y || 0) + (att.baseOffY || 0);
+				escapingFish.x = startX;
+				escapingFish.y = startY;
                 // Marquer le poisson comme "s'échappant" et lui donner une vitesse de fuite
                 escapingFish.escaping = true;
                 escapingFish.escapeStartTime = performance.now();
@@ -11472,23 +11706,17 @@
 
     // Met à jour en continu l'angle de la canne pour une animation fluide
     function updateRodAngle(deltaSec) {
-        // Angle de repos par défaut (légèrement vers le haut-gauche)
-        let target = -0.45;
-        const sway = Math.sin(performance.now() * 0.003) * 0.03; // petite oscillation
-
-        if (gameState.isPreviewingCast) {
-            // Plus on charge, plus la canne se plie vers l'arrière
-            const powerNorm = Math.min(1, Math.max(0, gameState.castPower / gameState.maxCastPower));
-            // Entre -0.35 rad (faible) et -1.15 rad (fort)
-            target = -0.35 - powerNorm * 0.8;
-        } else if (gameState.isCasting && gameState.isReeling) {
-            // En rembobinage, angle un peu plus bas
-            target = -0.55;
+        // Angle de repos fixe (aucune animation quand non cliqué)
+        const restAngle = -0.45;
+        if (!gameState.isMouseDown) {
+            gameState.rodAngle = restAngle;
+            return;
         }
 
-        // Interpolation douce
+        // Pendant l'appui, animer vers un angle levé, sans oscillation
+        const target = -0.9;
         const lerpRate = 8 * deltaSec; // vitesse d'approche
-        gameState.rodAngle = (1 - lerpRate) * (gameState.rodAngle || -0.45) + lerpRate * target + sway;
+        gameState.rodAngle = (1 - lerpRate) * (gameState.rodAngle || restAngle) + lerpRate * target;
     }
     // Évalue une règle de déblocage du catalogue contre les statistiques courantes
     function isUnlockedBySpec(unlockSpec, st, context) {
@@ -11836,6 +12064,8 @@
             points: fishType.basePoints + Math.floor((size - fishType.sizeRange[0]) * fishType.pointsPerSize),
             rarity: fishType.rarity || 'commun'
         };
+        // Durée de maintien du pattern propre à l'espèce + bruit individuel
+        newFish._patternHoldMs = computeSpeciesPatternHoldMs(fishType);
         
         gameState.fish.push(newFish);
         console.log(`[Spawn] ${emoji} ${fishType.name} spawné immédiatement après déblocage`);
