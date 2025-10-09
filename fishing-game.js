@@ -243,6 +243,8 @@
         `;
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
+        try { registerFishingWindow(overlay); } catch(_) {}
+        try { bringToFront(overlay); } catch(_) {}
         const close = ()=>{ if (overlay && overlay.parentNode) overlay.remove(); };
         panel.querySelector('#info-close')?.addEventListener('click', close);
         panel.querySelector('#info-open-guide')?.addEventListener('click', ()=>{ close(); showGuide(); });
@@ -525,6 +527,7 @@
                 max-width: 100%;
                 max-height: 100%;
                 touch-action: none; /* important pour éviter le scroll/zoom sur mobile */
+                border-radius: 16px; /* aligne les coins du canvas sur ceux du conteneur */
             }
             
             .fishing-timer-display {
@@ -2084,7 +2087,7 @@
                 x: 40,
                 y: 30,
                 speed: 0, // Immobile
-                emoji: '🌖',
+                emoji: '🌙',
                 size: 55,
                 opacity: 0.95,
                 isMoon: true
@@ -2364,7 +2367,7 @@
                 const isDaytime = t >= 0.25 && t < 0.75;
                 const set = [];
                 // Soleil/Lune
-                set.push({ x: 40, y: 30, speed: 0, emoji: isDaytime ? '☀️' : '🌖', size: isDaytime ? 60 : 55, opacity: 1.0, isSun: isDaytime, isMoon: !isDaytime });
+                set.push({ x: 40, y: 30, speed: 0, emoji: isDaytime ? '☀️' : '🌙', size: isDaytime ? 60 : 55, opacity: 1.0, isSun: isDaytime, isMoon: !isDaytime });
                 for (let i = 0; i < count; i++) {
                     set.push({ x: Math.random() * (canvas.width - 150), y: 5 + Math.random() * 25, speed: 8 + Math.random() * 15, emoji: emojis[Math.floor(Math.random()*emojis.length)], size: 25 + Math.random() * 25, opacity: 0.7 + Math.random() * 0.3 });
                 }
@@ -6050,7 +6053,11 @@
     function gameLoop(timestamp) {
         if (!gameState.isPlaying) return;
         const now = performance.now();
-        const deltaSec = (now - lastTime) / 1000;
+        // Calcul delta temps robuste: ignorer les grands sauts (onglet inactif, jank)
+        if (!lastTime) { lastTime = now; animationId = requestAnimationFrame(gameLoop); return; }
+        const rawDelta = (now - lastTime) / 1000;
+        // Clamp pour éviter accélérations: max 50 ms
+        const deltaSec = Math.max(0, Math.min(rawDelta, 0.05));
         lastTime = now;
         
         // Récupérer le canvas de rendu (mis en cache)
@@ -6204,6 +6211,8 @@
     // Fonction pour commencer le jeu
     function startGame() {
         gameState.isPlaying = true;
+        // Empêcher les boucles multiples
+        if (animationId) { try { cancelAnimationFrame(animationId); } catch(_) {} animationId = null; }
         gameState.score = 0;
         gameState.level = 1;
         gameState.timeLeft = 60;
@@ -6920,7 +6929,9 @@
                 '.fishing-guide-window',
                 '#cookie-manager-window',
                 '.fishing-test-window',
-                '.hat-selection-menu'
+                '.hat-selection-menu',
+                '#fishing-gameplay-info',
+                '.fishing-game-over-window'
             ];
             let maxZ = 30000;
             const all = document.querySelectorAll(selectors.join(','));
@@ -7567,6 +7578,8 @@
         `;
         
         document.body.appendChild(gameOverWindow);
+        try { registerFishingWindow(gameOverWindow); } catch(_) {}
+        try { bringToFront(gameOverWindow); } catch(_) {}
         
         // Bouton de fermeture
         const closeBtn = document.getElementById('fishing-game-over-close');
@@ -7644,6 +7657,15 @@
             }
         };
         
+        // Réinitialiser lastTime quand l'onglet redevient visible pour éviter accélération
+        try {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    lastTime = performance.now();
+                }
+            });
+        } catch(_) {}
+
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', tryStart);
         } else {
@@ -8588,6 +8610,8 @@
                 updateGuideLists();
             }
         } catch(_) { /* noop */ }
+        // Toujours synchroniser la carte de pêche
+        try { updateStatsDisplay(); } catch(_) { /* noop */ }
     }
     
     // Fonction pour synchroniser la progression avec les espèces débloquées
@@ -9414,7 +9438,9 @@
             const doUpdate = () => {
                 // Vérifier si le guide est ouvert
                 if (!document.querySelector('.fishing-guide-window')) {
-                    return; // Guide fermé, pas de mise à jour
+                    // Même si le guide est fermé, on peut quand même synchroniser la carte de pêche
+                    try { updateStatsDisplay(); } catch(_) {}
+                    return; // Pas de mise à jour du contenu du guide
                 }
                 
                 // Mettre à jour les variables globales du guide depuis le cookie de progression
@@ -9454,6 +9480,8 @@
                 
                 // Mettre à jour les détails en temps réel
                 updateGuideDetails();
+                // Synchroniser la carte de pêche en même temps que le guide
+                try { updateStatsDisplay(); } catch(_) {}
             };
             
             // Si rafraîchissement immédiat demandé, exécuter tout de suite
@@ -11325,6 +11353,31 @@
                     </div>
                 </div>
                 
+                <!-- Réinitialisation complète -->
+                <div style="
+                    background: rgba(239,68,68,0.18);
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 2px solid rgba(239,68,68,0.35);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px; color:#fecaca;">🧹 Réinitialiser le joueur</div>
+                    <div style="font-size: 11px; opacity: 0.85; margin-bottom: 8px;">Efface scores, stats, déblocages et préférences. Redémarre comme un nouveau joueur.</div>
+                    <button id="test-full-reset" style="
+                        width: 100%; 
+                        padding: 10px; 
+                        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); 
+                        color: white; 
+                        border: none; 
+                        border-radius: 6px; 
+                        font-weight: bold; 
+                        font-size: 14px; 
+                        cursor: pointer;
+                        transition: transform 0.1s, box-shadow 0.2s;
+                    " onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(239,68,68,0.4)'" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
+                        ♻️ Réinitialiser tout
+                    </button>
+                </div>
+
                 <div style="
                     font-size: 11px; 
                     opacity: 0.7; 
@@ -11401,6 +11454,7 @@
         const spawnButton = testWindow.querySelector('#test-spawn-button');
         const toggleAutoSpawnBtn = testWindow.querySelector('#test-toggle-autospawn');
         const clearFishBtn = testWindow.querySelector('#test-clear-fish');
+        const fullResetBtn = testWindow.querySelector('#test-full-reset');
         const closeBtn = testWindow.querySelector('#test-close');
         
         // Restaurer l'état
@@ -11695,6 +11749,47 @@
                 console.warn('Erreur lors de la sauvegarde des outils:', e);
             }
         };
+        // Bouton de réinitialisation complète
+        if (fullResetBtn) {
+            fullResetBtn.addEventListener('click', () => {
+                const ok = confirm('Voulez-vous vraiment tout réinitialiser ?\nScores, stats, déblocages et préférences seront effacés.');
+                if (!ok) return;
+                try {
+                    // Effacer cookies de progression et fenêtre
+                    deleteCookie('fishingProgress');
+                    deleteCookie('fishingWindowState');
+                    // Effacer préférences locales et scores
+                    localStorage.removeItem('fishingHighScore');
+                    localStorage.removeItem('fishingWelcomeShown');
+                    localStorage.removeItem('fishingGuideWindow');
+                    localStorage.removeItem('fishingTestToolsState');
+                    localStorage.removeItem('fishingTestToolsPosition');
+                } catch(_) {}
+                
+                // Réinitialiser l'état en mémoire
+                gameState.score = 0;
+                gameState.highScore = 0;
+                gameState.caughtFish = [];
+                gameState.biggestCatch = null;
+                gameState.totalWeight = 0;
+                gameState.level = 1;
+                if (gameState.progress && gameState.progress.hats) {
+                    gameState.progress.hats.equipped = null;
+                }
+                // Recharger une progression vierge et sauvegarder
+                gameState.progress = loadProgress();
+                saveProgress();
+                
+                // Rafraîchir les UI dépendantes
+                try { updateScoreDisplay(); } catch(_) {}
+                try { updateCaughtFishDisplay(); } catch(_) {}
+                try { updateStatsDisplay(); } catch(_) {}
+                try { if (typeof updateGuideLists === 'function') updateGuideLists(true); } catch(_) {}
+                
+                // Feedback
+                showToast('Profil réinitialisé. Bienvenue, nouveau pêcheur !', 'success');
+            });
+        }
         // Bouton de fermeture
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
