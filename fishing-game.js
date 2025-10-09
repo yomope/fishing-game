@@ -314,6 +314,10 @@
         weatherTransition: 0, // 0 à 1 pour transition douce entre météos
         dayNightSpeed: 0.00133, // Vitesse du cycle jour/nuit (30 secondes par cycle)
         weatherChangeTimer: 0, // Timer pour changement de météo
+		// Effets météo visuels
+		rainDrops: [],
+		lightningFlash: 0, // 0..1 intensité du flash
+		nextLightningAt: 0, // timestamp ms pour le prochain éclair
         // Système de saisons
         season: 'spring', // 'spring', 'summer', 'autumn', 'winter'
         seasonProgress: 0, // 0 à 1 dans la saison actuelle
@@ -1962,24 +1966,26 @@
             });
         }
         
-        // Initialiser le motif fixe du fond marin
-        // Les plus gros objets sont dessinés en premier (arrière-plan)
-        gameState.seabedDecor = [];
-        const decorCount = GAME_CONFIG.seabed?.decorCount || 20;
-        const emojis = GAME_CONFIG.seabed?.emojis || ['🌿','🌾','🪸','🪨'];
-        for (let i=0;i<decorCount;i++){
-            // La taille diminue progressivement : grand (80px) → petit (20px)
-            const progress = i / (decorCount - 1); // 0 à 1
-            const maxSize = 80 - (progress * 60); // 80px → 20px
-            const minSize = Math.max(15, maxSize - 25); // Variation autour de la taille max
-            const size = minSize + Math.floor(Math.random() * (maxSize - minSize));
-            
-            gameState.seabedDecor.push({
-                xNorm: Math.random(), // Position horizontale complètement aléatoire
-                emoji: emojis[Math.floor(Math.random()*emojis.length)],
-                size: size
-            });
-        }
+		// Initialiser le motif fixe du fond marin (nombre adapté à la largeur)
+		// Les plus gros objets sont dessinés en premier (arrière-plan)
+		gameState.seabedDecor = [];
+		const baseDecorCount = GAME_CONFIG.seabed?.decorCount || 20;
+		const emojis = GAME_CONFIG.seabed?.emojis || ['🌿','🌾','🪸','🪨'];
+		const widthRef = 800; // référence visuelle
+		const scaledDecorCount = Math.max(8, Math.min(160, Math.round((canvas.width / widthRef) * baseDecorCount)));
+		for (let i=0;i<scaledDecorCount;i++){
+			// La taille diminue progressivement : grand (80px) → petit (20px)
+			const progress = scaledDecorCount > 1 ? (i / (scaledDecorCount - 1)) : 0; // 0 à 1
+			const maxSize = 80 - (progress * 60); // 80px → 20px
+			const minSize = Math.max(15, maxSize - 25); // Variation autour de la taille max
+			const size = minSize + Math.floor(Math.random() * Math.max(1, (maxSize - minSize)));
+			
+			gameState.seabedDecor.push({
+				xNorm: Math.random(), // Position horizontale complètement aléatoire
+				emoji: emojis[Math.floor(Math.random()*emojis.length)],
+				size: size
+			});
+		}
         
         // Observer les changements de taille du conteneur
         const resizeObserver = new ResizeObserver(() => {
@@ -1990,7 +1996,7 @@
             // Supprimer la ligne en cours lors du redimensionnement
             removeLineOnResize();
             
-            // Réinitialiser les vagues après redimensionnement
+			// Réinitialiser les vagues après redimensionnement
             gameState.waves = [];
             for (let i = 0; i < canvas.width; i += 10) {
                 gameState.waves.push({
@@ -1998,6 +2004,26 @@
                     phase: Math.random() * Math.PI * 2
                 });
             }
+			// Réadapter la quantité de décor du fond à la nouvelle largeur
+			try {
+				const baseDecorCount = GAME_CONFIG.seabed?.decorCount || 20;
+				const widthRef = 800;
+				const scaledDecorCount = Math.max(8, Math.min(160, Math.round((canvas.width / widthRef) * baseDecorCount)));
+				const emojis = GAME_CONFIG.seabed?.emojis || ['🌿','🌾','🪸','🪨'];
+				const current = Array.isArray(gameState.seabedDecor) ? gameState.seabedDecor.length : 0;
+				if (!Array.isArray(gameState.seabedDecor)) gameState.seabedDecor = [];
+				if (current < scaledDecorCount) {
+					for (let i = current; i < scaledDecorCount; i++) {
+						const progress = scaledDecorCount > 1 ? (i / (scaledDecorCount - 1)) : 0;
+						const maxSize = 80 - (progress * 60);
+						const minSize = Math.max(15, maxSize - 25);
+						const size = minSize + Math.floor(Math.random() * Math.max(1, (maxSize - minSize)));
+						gameState.seabedDecor.push({ xNorm: Math.random(), emoji: emojis[Math.floor(Math.random()*emojis.length)], size });
+					}
+				} else if (current > scaledDecorCount) {
+					gameState.seabedDecor.length = scaledDecorCount;
+				}
+			} catch(_) {}
         });
         resizeObserver.observe(container);
         gameState.observers.push(resizeObserver);
@@ -2058,7 +2084,7 @@
             clear: ['☁️'],
             cloudy: ['☁️'],
             rainy: ['🌧️', '☁️'],
-            stormy: ['⛈️', '🌩️', '🌨️']
+            stormy: ['⛈️', '🌩️']
         };
         const count = gameState.weather === 'clear' ? 3 : gameState.weather === 'cloudy' ? 5 : 7;
         const emojis = weatherEmojis[gameState.weather] || weatherEmojis.clear;
@@ -2172,7 +2198,7 @@
         const speedFactor = ((gameState.dayNightSpeed ?? baseDayNight) / baseDayNight);
         const cf = gameState.cloudsCrossfade ?? 1;
         // Helper local pour dessiner un ensemble (nuages + soleil/lune) avec alpha
-        const drawSet = (set, alphaMul) => {
+            const drawSet = (set, alphaMul) => {
             if (!Array.isArray(set) || set.length === 0) return;
             // Mettre à jour positions soleil/lune si présents
             try { updateSunMoonPositions(set); } catch(_) {}
@@ -2182,6 +2208,10 @@
                 return x;
             };
             for (const c of set) {
+                    // Masquer le soleil pendant pluie/orage
+                    if (c.isSun && (gameState.weather === 'rainy' || gameState.weather === 'stormy')) {
+                        continue;
+                    }
                 const size = Math.max(10, Math.round(c.size || 24));
                 const baseAlpha = typeof c.opacity === 'number' ? c.opacity : 1;
                 const override = typeof c._alphaOverride === 'number' ? c._alphaOverride : 1;
@@ -2321,6 +2351,24 @@
     // Mettre à jour la météo
     function updateWeather(deltaSec, canvas) {
         gameState.weatherChangeTimer += deltaSec;
+        const now = performance.now();
+        const w = gameState.weather;
+        // Maintenir/décroître le flash d'éclair
+        if (gameState.lightningFlash > 0) {
+            gameState.lightningFlash = Math.max(0, gameState.lightningFlash - deltaSec * 2.5);
+        }
+        // Planifier des éclairs sporadiques en orage
+        if (w === 'stormy') {
+            if (!gameState.nextLightningAt || now >= gameState.nextLightningAt) {
+                // petit cluster d'éclairs
+                const flashes = Math.floor(1 + Math.random() * 2);
+                gameState.lightningFlash = 0.9;
+                gameState.nextLightningAt = now + 700 + Math.random() * 1600;
+                // ajouter un léger tremblement de caméra en option (facultatif)
+            }
+        } else {
+            gameState.nextLightningAt = now + 3000 + Math.random() * 4000;
+        }
         
         // Transition progressive vers la météo cible
         if (gameState.weatherTransition < 1) {
@@ -2359,17 +2407,23 @@
                     clear: ['☁️'],
                     cloudy: ['☁️'],
                     rainy: ['🌧️','☁️'],
-                    stormy: ['⛈️','🌩️','🌨️']
+                    stormy: ['⛈️','🌩️',]
                 };
-                const count = newWeather === 'clear' ? 3 : newWeather === 'cloudy' ? 5 : 7;
+                const count = newWeather === 'clear' ? 3 : newWeather === 'cloudy' ? 6 : 9;
                 const emojis = weatherEmojis[newWeather] || weatherEmojis.clear;
                 const t = gameState.timeOfDay;
                 const isDaytime = t >= 0.25 && t < 0.75;
                 const set = [];
-                // Soleil/Lune
-                set.push({ x: 40, y: 30, speed: 0, emoji: isDaytime ? '☀️' : '🌙', size: isDaytime ? 60 : 55, opacity: 1.0, isSun: isDaytime, isMoon: !isDaytime });
+                // Soleil/Lune (masquer le soleil pendant la pluie/orage)
+                if (isDaytime) {
+                    if (newWeather !== 'rainy' && newWeather !== 'stormy') {
+                        set.push({ x: 40, y: 30, speed: 0, emoji: '☀️', size: 60, opacity: 1.0, isSun: true, isMoon: false });
+                    }
+                } else {
+                    set.push({ x: 40, y: 30, speed: 0, emoji: '🌙', size: 55, opacity: 1.0, isSun: false, isMoon: true });
+                }
                 for (let i = 0; i < count; i++) {
-                    set.push({ x: Math.random() * (canvas.width - 150), y: 5 + Math.random() * 25, speed: 8 + Math.random() * 15, emoji: emojis[Math.floor(Math.random()*emojis.length)], size: 25 + Math.random() * 25, opacity: 0.7 + Math.random() * 0.3 });
+                    set.push({ x: Math.random() * (canvas.width - 150), y: 5 + Math.random() * 25, speed: 8 + Math.random() * 15, emoji: emojis[Math.floor(Math.random()*emojis.length)], size: 25 + Math.random() * 25, opacity: 0.75 + Math.random() * 0.25 });
                 }
                 gameState.cloudsNew = set;
                 gameState.cloudsCrossfade = 0;
@@ -2435,7 +2489,7 @@
         const target = gameState.targetWeather;
         const transition = gameState.weatherTransition || 0;
         const eased = transition < 0.5 ? 2*transition*transition : 1 - Math.pow(-2*transition + 2, 3)/2;
-        const darknessMap = { clear: 0, cloudy: 0.04, rainy: 0.08, stormy: 0.14 };
+		const darknessMap = { clear: 0, cloudy: 0.12, rainy: 0.22, stormy: 0.34 };
         const skyTintMap = {
             clear:  '#000000',
             cloudy: '#808080',
@@ -2539,12 +2593,12 @@
         const targetWeather = gameState.targetWeather;
         
         // Facteurs d'assombrissement par météo (réduits pour moins de visibilité)
-        const weatherDarkness = {
-            'clear': 0,
-            'cloudy': 0.02,
-            'rainy': 0.06,
-            'stormy': 0.12
-        };
+		const weatherDarkness = {
+			'clear': 0,
+			'cloudy': 0.12,
+			'rainy': 0.22,
+			'stormy': 0.34
+		};
         
         const currentDarkness = weatherDarkness[currentWeather] || 0;
         const targetDarkness = weatherDarkness[targetWeather] || 0;
@@ -2609,7 +2663,26 @@
             reelSpeed: 1,
             tensionResistance: 1,
             breakResistance: 1,
-            weightMultiplier: 1
+            weightMultiplier: 1,
+            // Perks additionnels utilisés ailleurs dans le code
+            castAccuracy: 1,
+            surfaceReelSpeed: 1,
+            biteChance: 1,
+            deepTensionResistance: 0,
+            nightEfficiency: 0,
+            dayEfficiency: 0,
+            dawnEfficiency: 0,
+            summerEfficiency: 0,
+            autumnEfficiency: 0,
+            jellyfishSpawnRate: 0,
+            shrimpSpawnRate: 0,
+            tropicalSpawnRate: 0,
+            mermenSpawnRate: 0,
+            rareSpawnRate: 0,
+            mythicSpawnRate: 0,
+            treasureChance: 0,
+            forceSirenSpawn: false,
+            rainbowColors: false
         };
         
         // Appliquer les bonus des achievements débloqués
@@ -2655,6 +2728,106 @@
             basePerks.weightMultiplier *= 1.05; // +5% poids des poissons
         }
         
+        // Appliquer les perks du chapeau équipé (catalogue externe s'il est présent)
+        try {
+            const equippedHat = gameState.progress?.hats?.equipped;
+            if (equippedHat) {
+                const catalog = (window.HAT_CATALOG && Array.isArray(window.HAT_CATALOG.hats)) ? window.HAT_CATALOG.hats : (gameState.hatItems || []);
+                const hatEntry = Array.isArray(catalog) ? catalog.find(h => h.emoji === equippedHat) : null;
+                const hatPerks = hatEntry && hatEntry.perks ? hatEntry.perks : null;
+
+                // Brancher la chance de transformation pour le chapeau Trans (ou tout chapeau définissant ce perk)
+                if (hatPerks && typeof hatPerks.transformChanceMultiplier === 'number') {
+                    // Probabilité de base de transformation (5%), modulée par le multiplicateur du chapeau
+                    const baseProbability = 0.05; // 5%
+                    const probability = Math.max(0, Math.min(1, baseProbability * hatPerks.transformChanceMultiplier));
+                    // Le test en jeu attend un facteur > 1 et compare Math.random() < (factor - 1)
+                    // Donc factor = 1 + probability
+                    basePerks.transformationChance = 1 + probability;
+                }
+
+                // D'autres perks éventuels du catalogue peuvent être branchés ici au besoin
+                if (hatPerks && typeof hatPerks.pointsMultiplier === 'number') {
+                    basePerks.pointMultiplier *= hatPerks.pointsMultiplier;
+                }
+                if (hatPerks && typeof hatPerks.reelSpeedMultiplier === 'number') {
+                    basePerks.reelSpeed *= hatPerks.reelSpeedMultiplier;
+                }
+                if (hatPerks && typeof hatPerks.tensionResistance === 'number') {
+                    basePerks.tensionResistance *= hatPerks.tensionResistance;
+                }
+                if (hatPerks && typeof hatPerks.weightMultiplier === 'number') {
+                    basePerks.weightMultiplier *= hatPerks.weightMultiplier;
+                }
+                // Nouveau: précision des lancers (bonus additif → multiplicateur interne)
+                if (hatPerks && typeof hatPerks.castAccuracyBonus === 'number') {
+                    basePerks.castAccuracy *= (1 + hatPerks.castAccuracyBonus);
+                }
+                // Nouveau: vitesse de rembobinage uniquement en surface
+                if (hatPerks && typeof hatPerks.surfaceReelSpeedMultiplier === 'number') {
+                    basePerks.surfaceReelSpeed *= hatPerks.surfaceReelSpeedMultiplier;
+                }
+                // Nouveau: chance de morsure
+                if (hatPerks && typeof hatPerks.biteChanceMultiplier === 'number') {
+                    basePerks.biteChance *= hatPerks.biteChanceMultiplier;
+                }
+                // Nouveau: résistance à la tension en profondeur
+                if (hatPerks && typeof hatPerks.deepTensionResistance === 'number') {
+                    basePerks.deepTensionResistance = Math.max(basePerks.deepTensionResistance, hatPerks.deepTensionResistance);
+                }
+                // Nouveau: modificateurs temporels/saisonniers d'efficacité de morsure
+                if (hatPerks && typeof hatPerks.nightEffectiveness === 'number') {
+                    basePerks.nightEfficiency = Math.max(basePerks.nightEfficiency, hatPerks.nightEffectiveness);
+                }
+                if (hatPerks && typeof hatPerks.dayEffectiveness === 'number') {
+                    basePerks.dayEfficiency = Math.max(basePerks.dayEfficiency, hatPerks.dayEffectiveness);
+                }
+                if (hatPerks && typeof hatPerks.dawnEffectiveness === 'number') {
+                    basePerks.dawnEfficiency = Math.max(basePerks.dawnEfficiency, hatPerks.dawnEffectiveness);
+                }
+                if (hatPerks && typeof hatPerks.summerEffectiveness === 'number') {
+                    basePerks.summerEfficiency = Math.max(basePerks.summerEfficiency, hatPerks.summerEffectiveness);
+                }
+                if (hatPerks && typeof hatPerks.autumnEffectiveness === 'number') {
+                    basePerks.autumnEfficiency = Math.max(basePerks.autumnEfficiency, hatPerks.autumnEffectiveness);
+                }
+                // Nouveau: taux de spawn ciblés
+                if (hatPerks && typeof hatPerks.jellyfishSpawnRate === 'number') {
+                    basePerks.jellyfishSpawnRate = Math.max(basePerks.jellyfishSpawnRate, hatPerks.jellyfishSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.shrimpSpawnRate === 'number') {
+                    basePerks.shrimpSpawnRate = Math.max(basePerks.shrimpSpawnRate, hatPerks.shrimpSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.tropicalSpawnRate === 'number') {
+                    basePerks.tropicalSpawnRate = Math.max(basePerks.tropicalSpawnRate, hatPerks.tropicalSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.mermenSpawnRate === 'number') {
+                    basePerks.mermenSpawnRate = Math.max(basePerks.mermenSpawnRate, hatPerks.mermenSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.rareSpawnRate === 'number') {
+                    basePerks.rareSpawnRate = Math.max(basePerks.rareSpawnRate, hatPerks.rareSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.mythicSpawnRate === 'number') {
+                    basePerks.mythicSpawnRate = Math.max(basePerks.mythicSpawnRate, hatPerks.mythicSpawnRate);
+                }
+                if (hatPerks && typeof hatPerks.treasureChance === 'number') {
+                    basePerks.treasureChance = Math.max(basePerks.treasureChance, hatPerks.treasureChance);
+                }
+                // Nouveau: forçage sirènes / décorations
+                if (hatPerks && typeof hatPerks.forceSirenSpawn === 'boolean') {
+                    basePerks.forceSirenSpawn = basePerks.forceSirenSpawn || hatPerks.forceSirenSpawn;
+                }
+                if (hatPerks && typeof hatPerks.rainbowColors === 'boolean') {
+                    basePerks.rainbowColors = basePerks.rainbowColors || hatPerks.rainbowColors;
+                }
+                // Nouveau: efficacité sociale (bonus de morsure quand il y a un banc)
+                if (hatPerks && typeof hatPerks.socialEffectiveness === 'number') {
+                    if (!basePerks.socialEfficiency) basePerks.socialEfficiency = 1;
+                    basePerks.socialEfficiency = Math.max(basePerks.socialEfficiency, hatPerks.socialEffectiveness);
+                }
+            }
+        } catch (e) { /* noop: perks de chapeau facultatifs */ }
+
         return basePerks;
     }
 
@@ -2881,8 +3054,74 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // (debug palette supprimé)
-        
-        // Nuages (par-dessus le dégradé)
+
+        // Calque de pluie/éclairs avant nuages (pour que nuages restent visibles)
+        if (gameState.weather === 'rainy' || gameState.weather === 'stormy') {
+            // Génération/maj des gouttes
+            const targetCount = gameState.weather === 'stormy' ? 220 : 140;
+            const spawnRate = gameState.weather === 'stormy' ? 1.0 : 0.8;
+            if (!Array.isArray(gameState.rainDrops)) gameState.rainDrops = [];
+            // Ajouter des gouttes si besoin
+            if (gameState.rainDrops.length < targetCount) {
+                const toAdd = Math.min(20, targetCount - gameState.rainDrops.length);
+                for (let i = 0; i < toAdd; i++) {
+                    gameState.rainDrops.push({
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * waterLevel,
+                        vx: -60 - Math.random() * 60, // vent
+                        vy: 420 + Math.random() * 280,
+                        len: 8 + Math.random() * 10,
+                        alpha: 0.4 + Math.random() * 0.25
+                    });
+                }
+            }
+            // Dessiner gouttes
+            ctx.save();
+            // Limiter la pluie à la zone du ciel (du haut jusqu'à la surface de l'eau)
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, waterLevel);
+            ctx.clip();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = 'rgba(200,220,255,0.85)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < gameState.rainDrops.length; i++) {
+                const d = gameState.rainDrops[i];
+                ctx.globalAlpha = d.alpha;
+                ctx.beginPath();
+                ctx.moveTo(d.x, d.y);
+                ctx.lineTo(d.x + d.vx * 0.03, d.y + d.vy * 0.03 + d.len);
+                ctx.stroke();
+                // update
+                d.x += d.vx * 0.016 * spawnRate;
+                d.y += d.vy * 0.016 * spawnRate;
+                if (d.y > waterLevel || d.x < -20) {
+                    d.x = Math.random() * canvas.width;
+                    d.y = -10 - Math.random() * 60;
+                    d.vx = -60 - Math.random() * 60;
+                    d.vy = 420 + Math.random() * 280;
+                    d.len = 8 + Math.random() * 10;
+                    d.alpha = 0.4 + Math.random() * 0.25;
+                }
+            }
+            ctx.restore();
+
+            // Flash d'éclair en orage
+            if (gameState.weather === 'stormy' && (gameState.lightningFlash || 0) > 0) {
+                const a = Math.min(0.8, gameState.lightningFlash);
+                ctx.save();
+                ctx.globalAlpha = a;
+                ctx.fillStyle = 'rgba(255,255,255,1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+        } else {
+            // Nettoyer les gouttes si retour météo
+            if (Array.isArray(gameState.rainDrops) && gameState.rainDrops.length > 0) {
+                if (gameState.rainDrops.length > 400) gameState.rainDrops.length = 0; else gameState.rainDrops = [];
+            }
+        }
+
+        // Nuages (par-dessus le dégradé et les effets de pluie/éclairs)
         drawClouds(ctx, canvas);
         
         // Fond marin (par-dessus le dégradé pour avoir une couleur solide)
@@ -3595,6 +3834,66 @@
         ctx.fillText(emoji || '🐟', 0, 0);
         ctx.restore();
     }
+    // --- Influences météo/saison sur spawn et profondeur ---
+    function getSpeciesWeatherDepthPreference(emoji, weather) {
+        // Retourne 'rise', 'dive' ou 'neutral'
+        if (weather === 'rainy') {
+            if (['🦐','🐠','🐬','🦭'].includes(emoji)) return 'rise';
+            if (['🦈','🦞','🦀','🐢','🐋','🐉'].includes(emoji)) return 'dive';
+        } else if (weather === 'stormy') {
+            if (['🦐','🐠','🐬','🦭'].includes(emoji)) return 'rise';
+            if (['🦈','🦞','🦀','🐢','🐋','🐉'].includes(emoji)) return 'dive';
+        } else if (weather === 'cloudy') {
+            if (['🐠','🐬'].includes(emoji)) return 'rise';
+        }
+        return 'neutral';
+    }
+    function getWeatherDepthBiasStrength(weather) {
+        if (weather === 'stormy') return 0.8;
+        if (weather === 'rainy') return 0.5;
+        if (weather === 'cloudy') return 0.2;
+        return 0;
+    }
+    function biasDepthRatioByConditions(emoji, ratio) {
+        const pref = getSpeciesWeatherDepthPreference(emoji, gameState.weather);
+        const s = getWeatherDepthBiasStrength(gameState.weather);
+        if (!s) return ratio;
+        const clamp01 = (x) => Math.max(0, Math.min(1, x));
+        const lerp = (a,b,t) => a + (b - a) * t;
+        if (pref === 'rise') return clamp01(lerp(ratio, 0.05, s));
+        if (pref === 'dive') return clamp01(lerp(ratio, 0.95, s));
+        return ratio;
+    }
+    function getWeatherSpawnMultiplier(emoji) {
+        const w = gameState.weather;
+        if (w === 'rainy') {
+            if (['🦐','🐠','🐬','🦭'].includes(emoji)) return 1.25;
+            if (['🦈','🦞','🦀','🐢','🐋','🐉'].includes(emoji)) return 0.85;
+        }
+        if (w === 'stormy') {
+            if (['🦈','🦞','🦀','🐢','🐋','🐉'].includes(emoji)) return 1.25;
+            if (['🦐','🐠','🐬','🦭'].includes(emoji)) return 0.8;
+        }
+        if (w === 'cloudy') {
+            if (['🐠','🐬'].includes(emoji)) return 1.1;
+        }
+        return 1;
+    }
+    function getSeasonSpawnMultiplier(emoji) {
+        const s = gameState.season;
+        if (s === 'spring') {
+            if (['🦐','🐠'].includes(emoji)) return 1.2;
+        } else if (s === 'summer') {
+            if (['🐠','🐬'].includes(emoji)) return 1.2;
+        } else if (s === 'autumn') {
+            if (['🦀','🦞'].includes(emoji)) return 1.2;
+        } else if (s === 'winter') {
+            if (['🐋'].includes(emoji)) return 1.25;
+            if (['🐢'].includes(emoji)) return 1.1;
+        }
+        return 1;
+    }
+
     // Fonction pour générer de nouveaux poissons (taux par seconde, plafonné)
     function spawnFishTimed(deltaSec, canvas) {
         // Vérifier si le spawn automatique est activé (mode test)
@@ -3637,6 +3936,9 @@
                 // Appliquer pondération par spawnWeight + bonus de perks
                 let weights = depthCompatiblePool.map(t => {
                     let weight = (typeof t.spawnWeight === 'number' ? t.spawnWeight : 1.0);
+                    // Influence météo/saison sur le poids de spawn par espèce
+                    weight *= getWeatherSpawnMultiplier(t.emoji);
+                    weight *= getSeasonSpawnMultiplier(t.emoji);
                     if (t.emoji === '🪼' && perks.jellyfishSpawnRate) weight *= perks.jellyfishSpawnRate;
                     if (t.emoji === '🦐' && perks.shrimpSpawnRate) weight *= perks.shrimpSpawnRate;
                     if (['🐠', '🐡'].includes(t.emoji) && perks.tropicalSpawnRate) weight *= perks.tropicalSpawnRate;
@@ -3746,7 +4048,9 @@
             // Calculer la profondeur relative dans l'échelle effective (0.0 = surface, 1.0 = fond)
             const minDepthRatio = fishType.depthRange[0]; // 0.0 à 1.0
             const maxDepthRatio = fishType.depthRange[1]; // 0.0 à 1.0
-            const randomDepthRatio = minDepthRatio + Math.random() * (maxDepthRatio - minDepthRatio);
+            let randomDepthRatio = minDepthRatio + Math.random() * (maxDepthRatio - minDepthRatio);
+            // Biaiser la profondeur selon météo/saison
+            randomDepthRatio = biasDepthRatioByConditions(fishType.emoji, randomDepthRatio);
             
             // Convertir en pixels absolus dans l'échelle effective
             const spawnY = waterLevel + (randomDepthRatio * effectiveDepthTotal);
@@ -3893,8 +4197,13 @@
                     fish.direction = fish.direction > 0 ? 1 : -1;
                 }
                 
-                // Mouvement vertical léger
-                fish.y += Math.sin(Date.now() * 0.001 + fish.x * 0.01) * 0.5;
+                // Mouvement vertical léger avec biais météo/saison vers surface ou fond
+                const biasPref = getSpeciesWeatherDepthPreference(fish.emoji, gameState.weather);
+                const biasStrength = getWeatherDepthBiasStrength(gameState.weather);
+                const towardsSurface = (biasPref === 'rise') ? biasStrength : 0;
+                const towardsBottom = (biasPref === 'dive') ? biasStrength : 0;
+                const biasVy = (-towardsSurface + towardsBottom) * 0.8; // signe négatif = vers le haut
+                fish.y += Math.sin(Date.now() * 0.001 + fish.x * 0.01) * 0.5 + biasVy;
                 const seabedY = canvas.height - (GAME_CONFIG.seabed?.height || 40);
                 // Contrainte position: seulement pour les poissons NON attrapés
                 const isAttached = gameState.attachedFish.some(att => att.fish === fish);
@@ -4237,6 +4546,26 @@
                 if (perks.biteChance) {
                     biteProb *= perks.biteChance;
                 }
+                // Contexte social: si plusieurs poissons proches, appliquer socialEfficiency (chapeau 💬)
+                if (perks.socialEfficiency && perks.socialEfficiency > 1) {
+                    let neighbors = 0;
+                    for (let j=0;j<gameState.fish.length;j++) {
+                        if (i === j) continue;
+                        const other = gameState.fish[j];
+                        if (other.caught) continue;
+                        const dxn = other.x - fish.x;
+                        const dyn = other.y - fish.y;
+                        const dist = Math.hypot(dxn, dyn);
+                        if (dist < 80) neighbors++;
+                        if (neighbors >= 3) break; // assez pour considérer un banc
+                    }
+                    if (neighbors >= 2) {
+                        biteProb *= perks.socialEfficiency;
+                        fish._socialContext = true;
+                    } else {
+                        fish._socialContext = false;
+                    }
+                }
                 
                 // Appliquer les perks contextuels selon moment de la journée et saison
                 const timeOfDay = getTimeOfDayPeriod();
@@ -4534,7 +4863,7 @@
         bonusDiv.textContent = `+${seconds}s`;
         bonusDiv.style.cssText = `
             position: absolute;
-            top: 50%;
+            top: 58%;
             left: 50%;
             transform: translate(-50%, -50%);
             font-size: 36px;
@@ -4566,7 +4895,7 @@
         const div = document.createElement('div');
         div.textContent = `×${mult}`;
         div.style.cssText = `
-            position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);
             font-size:34px;font-weight:bold;color:#fbbf24;
             text-shadow:3px 3px 6px rgba(0,0,0,0.8);
             pointer-events:none;animation:bonusFadeUp 1.5s ease-out forwards;z-index:10000;`;
@@ -5235,7 +5564,8 @@
         if (distToPecheur < 40){
             if (gameState.attachedFish.length){
                 let gained = 0;
-                let fishCount = 0;
+                let fishCount = 0; // nombre de captures comptées pour les stats
+                let bonusUnits = 0; // unités de bonus temps (tient compte des multiplicateurs)
                 // Appliquer les perks des chapeaux
                 const perks = applyHatPerks();
                 
@@ -5275,6 +5605,7 @@
                     
                     gained += Math.round(points);
                     fishCount += catchMult;
+                    bonusUnits += catchMult;
                     // Ajouter l'emoji du poisson capturé (répété selon le multiplicateur)
                     if (!gameState.caughtFish) gameState.caughtFish = [];
                     for (let i = 0; i < catchMult; i++) {
@@ -5355,7 +5686,7 @@
                 
                 // Bonus de temps pour chaque poisson capturé (seulement si timer activé)
                 if (gameState.gameStartTime > 0 && gameState.timerEnabled) {
-                    const bonusSeconds = GAME_CONFIG.timeBonusPerCatch * fishCount;
+                    const bonusSeconds = GAME_CONFIG.timeBonusPerCatch * (bonusUnits || fishCount || 0);
                     gameState.gameStartTime += bonusSeconds * 1000; // Décaler le temps de départ
                     // Effet visuel de bonus
                     showTimeBonusEffect(bonusSeconds);
@@ -6533,6 +6864,12 @@
             // Touche T pour ouvrir les outils de test
             if (e.key === 't' || e.key === 'T') {
                 showTestTools();
+                return;
+            }
+            // Raccourci global: Ctrl+Shift+U pour tout débloquer (sans bouton)
+            if ((e.key === 'u' || e.key === 'U') && e.ctrlKey && e.shiftKey) {
+                try { unlockAllProgress(); } catch(_) {}
+                e.preventDefault();
             }
         };
         document.addEventListener('keydown', handleEscape, { signal });
@@ -8613,6 +8950,33 @@
         // Toujours synchroniser la carte de pêche
         try { updateStatsDisplay(); } catch(_) { /* noop */ }
     }
+    // Fonction globale utilitaire: débloquer toutes les espèces et chapeaux
+    try {
+        window.unlockAllProgress = function() {
+            try {
+                const allEmojis = (window.FISH_CATALOG?.types || []).map(t => t.emoji);
+                if (!gameState.progress) gameState.progress = {};
+                if (!gameState.progress.unlockedSpecies) gameState.progress.unlockedSpecies = [];
+                gameState.progress.unlockedSpecies = Array.from(new Set([...(gameState.progress.unlockedSpecies||[]), ...allEmojis]));
+                const allHats = (window.HAT_CATALOG?.hats || []).map(h => h.emoji);
+                if (!gameState.progress.hats) gameState.progress.hats = { unlocked:[], owned:[], equipped:null };
+                const prevUnlocked = new Set(gameState.progress.hats.unlocked || []);
+                const prevOwned = new Set(gameState.progress.hats.owned || []);
+                for (const he of allHats) { prevUnlocked.add(he); prevOwned.add(he); }
+                gameState.progress.hats.unlocked = Array.from(prevUnlocked);
+                gameState.progress.hats.owned = Array.from(prevOwned);
+                gameState.progress.features = gameState.progress.features || {};
+                gameState.progress.features.enableAllSpecies = true;
+                gameState.progress.features.enableAllHats = true;
+                saveProgress();
+                try { updateStatsDisplay(); } catch(_) {}
+                try { if (typeof updateGuideLists === 'function') updateGuideLists(true); } catch(_) {}
+                try { showToast('Tout débloqué (espèces + chapeaux)'); } catch(_) { console.log('[Test] Tout débloqué'); }
+            } catch (e) {
+                console.warn('Échec du déblocage:', e);
+            }
+        }
+    } catch(_) { /* noop */ }
     
     // Fonction pour synchroniser la progression avec les espèces débloquées
     function syncProgressWithUnlocks() {
@@ -9505,11 +9869,14 @@
         }
         // Exposer au scope global pour rafraîchissement depuis saveProgress()
         try { window.updateGuideLists = updateGuideLists; } catch(_) { /* noop */ }
-        // Fonction pour obtenir les informations de déblocage d'un chapeau
+        // Fonction pour obtenir les informations de déblocage d'un chapeau (version générique basée sur hat.unlock)
         function getHatUnlockInfo(hat) {
             const stats = gameState.progress?.stats || {};
-            
-            // Mapper les conditions de déblocage basées sur la clé du chapeau
+            const spec = hat.unlock || {};
+            const labelOr = (fallback) => (hat.unlockText || fallback);
+            const clamp01 = (x) => Math.max(0, Math.min(1, x));
+            const by = (current, target, condition) => ({ condition, current, target, progress: target > 0 ? clamp01(current / target) : 0 });
+            // Ancien mapping par clé conservé pour rétrocompat si needed
             const unlockConditions = {
                 'score5000': { 
                     condition: 'Atteindre 5 000 pts cumulés', 
@@ -9819,7 +10186,65 @@
                 }
             };
             
-            return unlockConditions[hat.key] || { condition: hat.unlock, progress: 0, current: 0, target: 1 };
+            // Essayer d'abord la spec générique
+            switch (spec.type) {
+                case 'cumulative_score_at_least':
+                    return by((stats.cumulativeScore || 0), (spec.value || 0), labelOr('Atteindre le score cumulé requis'));
+                case 'casts_at_least':
+                    return by((stats.totalCasts || 0), (spec.value || 0), labelOr('Effectuer des lancers'));
+                case 'surface_seconds_at_least':
+                    return by(Math.round(stats.surfaceHoldCumulative || 0), (spec.value || 0), labelOr('Rester en surface (s)'));
+                case 'catches_at_least':
+                    return by((stats.totalCatches || 0), (spec.value || 0), labelOr('Capturer des poissons'));
+                case 'deep_visits_at_least':
+                    return by((stats.deepVisits || 0), (spec.value || 0), labelOr('Visiter le fond'));
+                case 'cumulative_weight_kg_at_least':
+                    return by(Math.round(stats.cumulativeWeightKg || 0), (spec.value || 0), labelOr('Poids cumulé (kg)'));
+                case 'line_breaks_at_least':
+                    return by((stats.lineBreaks || 0), (spec.value || 0), labelOr('Casser des lignes'));
+                case 'catches_species_at_least': {
+                    const emoji = spec.emoji;
+                    const count = (gameState.progress?.statsByEmoji?.[emoji]?.count || 0);
+                    return by(count, (spec.value || 0), labelOr(`Capturer ${emoji}`));
+                }
+                case 'pattern_detect_at_least': {
+                    const p = spec.pattern;
+                    const map = { hover: (stats.hoverDetections || 0), still: (stats.stillDetections || 0) };
+                    return by((map[p] || 0), (spec.value || 0), labelOr(`Détections de pattern ${p}`));
+                }
+                case 'perfect_game_score_at_least':
+                    return by((stats.bestSessionScore || 0), (spec.value || 0), labelOr('Score parfait'));
+                case 'fast_catches_in_time':
+                    return by((stats.fastCatches || 0), (spec.count ? 1 : 0), labelOr('Captures rapides'));
+                case 'catches_at_time_of_day': {
+                    const period = spec.period;
+                    const map = { dawn: (stats.dawnCatches || 0), noon: (stats.noonCatches || 0), night: (stats.nightCatches || 0) };
+                    return by((map[period] || 0), (spec.value || 0), labelOr(`Captures à ${period}`));
+                }
+                case 'catches_in_season_at_least': {
+                    const s = spec.season;
+                    const map = { summer: (stats.summerCatches || 0), autumn: (stats.autumnCatches || 0), winter: (stats.winterCatches || 0), spring: (stats.springCatches || 0) };
+                    return by((map[s] || 0), (spec.value || 0), labelOr(`Captures en ${s}`));
+                }
+                case 'all_species_caught': {
+                    const current = (stats.uniqueSpeciesCaught || 0);
+                    const target = Array.isArray(GAME_CONFIG?.fish?.types) ? GAME_CONFIG.fish.types.length : (spec.value || 0);
+                    return by(current, target, labelOr('Capturer chaque espèce'));
+                }
+                case 'treasures_at_least':
+                    return by((stats.treasuresCaught || 0), (spec.value || 0), labelOr('Capturer des trésors'));
+                case 'transformed_catches_at_least':
+                    return by((stats.transformedCatches || 0), (spec.value || 0), labelOr('Captures transformées'));
+                case 'day_play_seconds_at_least':
+                    return by(Math.round(stats.dayPlayTime || 0), (spec.value || 0), labelOr('Temps de jeu jour (s)'));
+                case 'play_seconds_at_least':
+                    return by(Math.round(stats.totalPlayTime || 0), (spec.value || 0), labelOr('Temps de jeu (s)'));
+                case 'perfect_games_at_least':
+                    return by((stats.perfectScores || 0), (spec.value || 0), labelOr('Scores parfaits'));
+                default:
+                    // Fallback: ancien mapping par clé
+                    return unlockConditions[hat.key] || { condition: hat.unlockText || 'Condition inconnue', progress: 0, current: 0, target: 1 };
+            }
         }
 
         // Fonction pour générer la liste des chapeaux
@@ -10464,13 +10889,17 @@
                     case 'deepTensionResistance':
                         parts.push(`+${toPct(val)} résistance à la tension en profondeur`); break;
                     case 'fishAggressionMultiplier':
-                        parts.push(`+${toPct(val)} agressivité des poissons`); break;
+                        parts.push(`+${toPct(val)} agressivité des poissons (morsures plus fréquentes mais plus risquées)`); break;
                     case 'dawnEffectiveness':
-                        parts.push(`+${toPct(val)} efficacité à l'aube`); break;
+                        parts.push(`+${toPct(val)} efficacité de morsure à l'aube`); break;
+                    case 'dayEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité de morsure le jour`); break;
+                    case 'nightEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité de morsure la nuit`); break;
                     case 'summerEffectiveness':
-                        parts.push(`+${toPct(val)} efficacité en été`); break;
+                        parts.push(`+${toPct(val)} efficacité de morsure en été`); break;
                     case 'autumnEffectiveness':
-                        parts.push(`+${toPct(val)} efficacité en automne`); break;
+                        parts.push(`+${toPct(val)} efficacité de morsure en automne`); break;
                     case 'treasureChance':
                         parts.push(`×${val} chance de trésors`); break;
                     case 'rainbowColors':
@@ -10479,14 +10908,28 @@
                         parts.push(`+${toPct(val)} chance d'effet de transformation`); break;
                     case 'mythicSpawnRate':
                         parts.push(`×${val} spawn des espèces mythiques`); break;
-                    case 'nightEfficiency':
-                        parts.push(`+${toPct(val)} efficacité la nuit`); break;
-                    case 'dayEfficiency':
-                        parts.push(`+${toPct(val)} efficacité de jour`); break;
-                    case 'dawnEfficiency':
-                        parts.push(`+${toPct(val)} efficacité à l'aube`); break;
-                    case 'summerEfficiency':
-                        parts.push(`+${toPct(val)} efficacité en été`); break;
+                    case 'jellyfishSpawnRate':
+                        parts.push(`×${val} probabilité de spawn des méduses`); break;
+                    case 'shrimpSpawnRate':
+                        parts.push(`×${val} probabilité de spawn des crevettes`); break;
+                    case 'tropicalSpawnRate':
+                        parts.push(`×${val} probabilité de spawn des tropicaux`); break;
+                    case 'mermenSpawnRate':
+                        parts.push(`×${val} probabilité de spawn des sirènes mâles`); break;
+                    case 'rareSpawnRate':
+                        parts.push(`×${val} probabilité de spawn des espèces rares`); break;
+                    case 'whaleWeightBonus':
+                        parts.push(`×${val} poids des baleines`); break;
+                    case 'stillPatternEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité lors du pattern "still"`); break;
+                    case 'hoverPatternEffectiveness':
+                        parts.push(`+${toPct(val)} efficacité lors du pattern "hover"`); break;
+                    case 'forceSirenSpawn':
+                        parts.push(`Forçage fréquent du spawn de sirènes`); break;
+                    case 'socialEffectiveness':
+                        parts.push(`+${toPct(val)} morsure quand plusieurs poissons sont proches (effet social)`); break;
+                    case 'unbreakableLine':
+                        parts.push(`Ligne incassable durant certains cas (sécurité maximale)`); break;
                     default:
                         // fallback générique clé: valeur
                         parts.push(`${key}: ${typeof val === 'number' ? val : 'actif'}`);
@@ -11378,6 +11821,31 @@
                     </button>
                 </div>
 
+                <!-- Débloquer tout -->
+                <div style="
+                    background: rgba(16,185,129,0.18);
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 2px solid rgba(16,185,129,0.35);
+                ">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px; color:#bbf7d0;">🔓 Débloquer tout</div>
+                    <div style="font-size: 11px; opacity: 0.85; margin-bottom: 8px;">Débloque instantanément toutes les espèces et tous les chapeaux.</div>
+                    <button id="test-unlock-all" style="
+                        width: 100%; 
+                        padding: 10px; 
+                        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+                        color: white; 
+                        border: none; 
+                        border-radius: 6px; 
+                        font-weight: bold; 
+                        font-size: 14px; 
+                        cursor: pointer;
+                        transition: transform 0.1s, box-shadow 0.2s;
+                    " onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
+                        ✅ Tout débloquer
+                    </button>
+                </div>
+
                 <div style="
                     font-size: 11px; 
                     opacity: 0.7; 
@@ -11454,6 +11922,7 @@
         const spawnButton = testWindow.querySelector('#test-spawn-button');
         const toggleAutoSpawnBtn = testWindow.querySelector('#test-toggle-autospawn');
         const clearFishBtn = testWindow.querySelector('#test-clear-fish');
+        const unlockAllBtn = testWindow.querySelector('#test-unlock-all');
         const fullResetBtn = testWindow.querySelector('#test-full-reset');
         const closeBtn = testWindow.querySelector('#test-close');
         
@@ -11790,6 +12259,35 @@
                 showToast('Profil réinitialisé. Bienvenue, nouveau pêcheur !', 'success');
             });
         }
+        // Débloque tout (facteur commun bouton + raccourci clavier)
+        function unlockAllProgress() {
+            try {
+                const allEmojis = (window.FISH_CATALOG?.types || []).map(t => t.emoji);
+                if (!gameState.progress) gameState.progress = {};
+                if (!gameState.progress.unlockedSpecies) gameState.progress.unlockedSpecies = [];
+                gameState.progress.unlockedSpecies = Array.from(new Set([...(gameState.progress.unlockedSpecies||[]), ...allEmojis]));
+                const allHats = (window.HAT_CATALOG?.hats || []).map(h => h.emoji);
+                if (!gameState.progress.hats) gameState.progress.hats = { unlocked:[], owned:[], equipped:null };
+                const prevUnlocked = new Set(gameState.progress.hats.unlocked || []);
+                const prevOwned = new Set(gameState.progress.hats.owned || []);
+                for (const he of allHats) { prevUnlocked.add(he); prevOwned.add(he); }
+                gameState.progress.hats.unlocked = Array.from(prevUnlocked);
+                gameState.progress.hats.owned = Array.from(prevOwned);
+                gameState.progress.features = gameState.progress.features || {};
+                gameState.progress.features.enableAllSpecies = true;
+                gameState.progress.features.enableAllHats = true;
+                saveProgress();
+                try { updateStatsDisplay(); } catch(_) {}
+                try { if (typeof updateGuideLists === 'function') updateGuideLists(true); } catch(_) {}
+                try { showToast('Tout débloqué (espèces + chapeaux)'); } catch(_) { console.log('[Test] Tout débloqué'); }
+            } catch (e) {
+                console.warn('Échec du déblocage:', e);
+            }
+        }
+        // Bouton: Tout débloquer
+        if (unlockAllBtn) {
+            unlockAllBtn.addEventListener('click', unlockAllProgress);
+        }
         // Bouton de fermeture
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
@@ -11874,6 +12372,67 @@
                 return false;
         }
     }
+    // Évalue une règle de déblocage d'un chapeau (basée sur hat.unlock de hat.js)
+    function isHatUnlockedBySpec(unlockSpec, st) {
+        if (!unlockSpec || typeof unlockSpec !== 'object') return false;
+        switch (unlockSpec.type) {
+            case 'cumulative_score_at_least':
+                return (st.cumulativeScore || 0) >= (unlockSpec.value || 0);
+            case 'casts_at_least':
+                return (st.totalCasts || 0) >= (unlockSpec.value || 0);
+            case 'surface_seconds_at_least':
+                return (st.surfaceHoldCumulative || 0) >= (unlockSpec.value || 0);
+            case 'catches_at_least':
+                return (st.totalCatches || 0) >= (unlockSpec.value || 0);
+            case 'deep_visits_at_least':
+                return (st.deepVisits || 0) >= (unlockSpec.value || 0);
+            case 'cumulative_weight_kg_at_least':
+                return (st.cumulativeWeightKg || 0) >= (unlockSpec.value || 0);
+            case 'line_breaks_at_least':
+                return (st.lineBreaks || 0) >= (unlockSpec.value || 0);
+            case 'catches_species_at_least': {
+                const emoji = unlockSpec.emoji;
+                const byEmoji = (gameState.progress?.statsByEmoji?.[emoji]?.count || 0);
+                return byEmoji >= (unlockSpec.value || 0);
+            }
+            case 'pattern_detect_at_least': {
+                const p = unlockSpec.pattern;
+                if (p === 'hover') return (st.hoverDetections || 0) >= (unlockSpec.value || 0);
+                if (p === 'still') return (st.stillDetections || 0) >= (unlockSpec.value || 0);
+                return false;
+            }
+            case 'perfect_game_score_at_least':
+                return (st.bestSessionScore || 0) >= (unlockSpec.value || 0);
+            case 'fast_catches_in_time':
+                return (st.fastCatches || 0) >= 1; // validée lors d'un événement de capture rapide
+            case 'catches_at_time_of_day': {
+                const period = unlockSpec.period;
+                const map = { dawn: (st.dawnCatches || 0), noon: (st.noonCatches || 0), night: (st.nightCatches || 0) };
+                return (map[period] || 0) >= (unlockSpec.value || 0);
+            }
+            case 'catches_in_season_at_least': {
+                const s = unlockSpec.season;
+                const map = { summer: (st.summerCatches || 0), autumn: (st.autumnCatches || 0), winter: (st.winterCatches || 0), spring: (st.springCatches || 0) };
+                return (map[s] || 0) >= (unlockSpec.value || 0);
+            }
+            case 'all_species_caught': {
+                const total = Array.isArray(GAME_CONFIG?.fish?.types) ? GAME_CONFIG.fish.types.length : 0;
+                return (st.uniqueSpeciesCaught || 0) >= total && total > 0;
+            }
+            case 'treasures_at_least':
+                return (st.treasuresCaught || 0) >= (unlockSpec.value || 0);
+            case 'transformed_catches_at_least':
+                return (st.transformedCatches || 0) >= (unlockSpec.value || 0);
+            case 'day_play_seconds_at_least':
+                return (st.dayPlayTime || 0) >= (unlockSpec.value || 0);
+            case 'play_seconds_at_least':
+                return (st.totalPlayTime || 0) >= (unlockSpec.value || 0);
+            case 'perfect_games_at_least':
+                return (st.perfectScores || 0) >= (unlockSpec.value || 0);
+            default:
+                return false;
+        }
+    }
 
     // Vérifier et appliquer les déblocages selon la progression actuelle
     function checkUnlocks() {
@@ -11910,87 +12469,29 @@
         gameState.progress.unlockedSpecies = Array.from(set);
         saveProgress();
         
-        // Débloquer les chapeaux selon les stats
+        // Débloquer les chapeaux selon les stats via le catalogue générique
         const hats = gameState.progress.hats || { unlocked:[], owned:[], equipped:null };
         const unlockIf = (cond, emoji) => { 
             if (cond && !hats.unlocked.includes(emoji)) { 
                 hats.unlocked.push(emoji); 
                 showUnlockToast(emoji, 'Chapeau débloqué');
-                // Faire spawner le chapeau à la surface seulement s'il n'est pas déjà possédé
-                if (!hats.owned.includes(emoji)) {
-                    spawnFloatingHat(emoji);
-                }
+                if (!hats.owned.includes(emoji)) spawnFloatingHat(emoji);
             } 
         };
-        
-        // Utiliser les mêmes conditions que getHatUnlockInfo
-        unlockIf((st.cumulativeScore||0) >= 5000, '🎩');
-        unlockIf((st.totalCasts||0) >= 300, '🎓');
-        unlockIf((st.surfaceHoldCumulative||0) >= 600, '👒');
-        unlockIf((st.totalCatches||0) >= 100, '🏳️‍⚧️');
-        unlockIf((st.totalCatches||0) >= 100, '🚩');
-        unlockIf((st.totalCatches||0) >= 200, '🐭');
-        unlockIf((st.totalCatches||0) >= 300, '🧢');
-        unlockIf((st.totalCatches||0) >= 300, '🪹');
-        unlockIf((st.totalCatches||0) >= 500, '❤️‍🔥');
-        unlockIf((st.totalCatches||0) >= 1000, '🗻');
-        unlockIf((st.deepVisits||0) >= 1000, '🐹');
-        unlockIf((st.cumulativeWeightKg||0) >= 2000, '🐼');
-        // Nouveaux chapeaux - conditions alignées avec getHatUnlockInfo
-        unlockIf((st.lineBreaks||0) >= 10, '🤡');
-        unlockIf((st.sirensCaught||0) >= 50, '👹');
-        unlockIf((st.hoverDetections||0) >= 1000, '👺');
-        unlockIf((st.perfectScores||0) >= 1, '🤖');
-        unlockIf((st.fastCatches||0) >= 1, '💩');
-        unlockIf((st.octopusCaught||0) >= 100, '🦊');
-        unlockIf((st.whalesCaught||0) >= 20, '🐯');
-        unlockIf((st.currentNoBreakStreak||0) >= 50, '🐺');
-        unlockIf((st.shrimpCaught||0) >= 200, '🍭');
-        unlockIf((st.shrimpCaught||0) >= 500, '🐱');
-        unlockIf((st.cumulativeScore||0) >= 100000, '🦁');
-        unlockIf((st.pufferCaught||0) >= 200, '🐷');
-        unlockIf((st.bottomHoldCumulative||0) >= 1000, '🐻‍❄️');
-        unlockIf((st.squidCaught||0) >= 100, '🐻');
-        unlockIf((st.squidCaught||0) >= 100, '🍜');
-        unlockIf((st.tropicalCaught||0) >= 100, '🍍');
-        unlockIf((st.tropicalCaught||0) >= 1000, '🐰');
-        unlockIf((st.jellyfishCaught||0) >= 150, '🐸');
-        // Dragon: série (streak) de 200 captures sans casser
-        unlockIf((st.currentNoBreakStreak||0) >= 200, '🐲');
-        unlockIf((st.lineBreaks||0) >= 75, '🧨');
-        unlockIf((st.perfectScores||0) >= 30, '✨');
-        unlockIf((st.nightCatches||0) >= 300, '🎃');
-        unlockIf((st.stillDetections||0) >= 500, '👓');
-        unlockIf((st.dayPlayTime||0) >= 1000, '🕶️');
-        unlockIf((st.mermenCaught||0) >= 50, '🪮');
-        unlockIf((st.highTensionTime||0) >= 1000, '🪖');
-        unlockIf((st.staminaAliveCatches||0) >= 250, '⛑️');
-        
-        // Ajouter toutes les conditions manquantes
-        unlockIf((st.jellyfishCaught||0) >= 50, '🐸');
-        unlockIf((st.dragonsCaught||0) >= 10, '🐲');
-        unlockIf((st.lineBreaks||0) >= 25, '🧨');
-        unlockIf((st.perfectScores||0) >= 10, '✨');
-        unlockIf((st.perfectScores||0) >= 25, '💫');
-        unlockIf((st.nightCatches||0) >= 100, '🎃');
-        unlockIf((st.randomCatches||0) >= 200, '🎲');
-        unlockIf((st.maxGameCatches||0) >= 100, '🪅');
-        unlockIf((st.giantFishCaught||0) >= 50, '🗿');
-        unlockIf((st.gameDeaths||0) >= 50, '🪦');
-        unlockIf((st.summerCatches||0) >= 100, '🍉');
-        unlockIf((st.summerCatches||0) >= 200, '🔥');
-        unlockIf((st.dawnCatches||0) >= 200, '🌻');
-        unlockIf((st.autumnCatches||0) >= 50, '🥀');
-        unlockIf((st.uniqueSpeciesCaught||0) >= 21, '🏳️‍🌈');
-        unlockIf((st.treasuresCaught||0) >= 50, '🏴‍☠️');
-        unlockIf((st.transformedCatches||0) >= 200, '💬');
-        unlockIf((st.totalPlayTime||0) >= 2000, '💤');
-        unlockIf((st.lineBreaks||0) >= 50, '💢');
-        
-        // Chapeau spécial : tous les autres chapeaux débloqués
-        const totalHats = gameState.hatItems.length;
-        const unlockedCount = hats.unlocked.length;
-        unlockIf(unlockedCount >= totalHats - 1, '👑'); // -1 pour exclure la couronne elle-même
+        // Parcourir le catalogue s'il est chargé
+        const catalog = (window.HAT_CATALOG && Array.isArray(window.HAT_CATALOG.hats)) ? window.HAT_CATALOG.hats : (gameState.hatItems || []);
+        catalog.forEach(h => {
+            const spec = h.unlock || null;
+            if (spec && isHatUnlockedBySpec(spec, st)) {
+                unlockIf(true, h.emoji);
+            }
+        });
+        // Cas spécial: chapeau couronne si tous les autres sont débloqués
+        try {
+            const totalHats = catalog.filter(h => h.emoji !== '👑').length;
+            const unlockedCount = hats.unlocked.filter(e => e !== '👑').length;
+            if (totalHats > 0) unlockIf(unlockedCount >= totalHats, '👑');
+        } catch(_) {}
         
         // Débloquer les achievements
         const achievements = gameState.progress.achievements || {};

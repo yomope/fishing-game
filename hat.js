@@ -25,7 +25,7 @@ window.HAT_CATALOG = {
         { emoji:'🪹', name:'Chapeau Nid', rarity:'commun', unlockText:"Capturer 900 poissons", unlock:{ type:'catches_at_least', value:900 }, key:'catches300', perks:{ reelSpeedMultiplier:1.2 } },
         { emoji:'🏳️‍🌈', name:'Chapeau Arc-en-ciel', rarity:'légendaire', unlockText:"Capturer 1 de chaque espèce", unlock:{ type:'all_species_caught' }, key:'allSpecies', perks:{ pointsMultiplier:2.0, rainbowColors:true } },
         { emoji:'🏳️‍⚧️', name:'Chapeau Trans', rarity:'rare', unlockText:"Capturer 300 poissons", unlock:{ type:'catches_at_least', value:300 }, key:'catches100', perks:{ transformChanceMultiplier:1.3 } },
-        { emoji:'🏴‍☠️', name:'Chapeau Pirate', rarity:'épique', unlockText:"Capturer 50 trésors", unlock:{ type:'treasures_at_least', value:50 }, key:'treasure50', perks:{ treasureChance:3.0 } },
+        { emoji:'🏴‍☠️', name:'Chapeau Pirate', rarity:'épique', unlockText:"Capturer 800 poissons", unlock:{ type:'catches_at_least', value:800 }, key:'catches800', perks:{ rareSpawnRate:2.0 } },
         { emoji:'🚩', name:'Chapeau Drapeau', rarity:'commun', unlockText:"Capturer 300 poissons", unlock:{ type:'catches_at_least', value:300 }, key:'catches100', perks:{ pointsMultiplier:1.2 } },
         { emoji:'🗻', name:'Chapeau Montagne', rarity:'légendaire', unlockText:"Capturer 3000 poissons", unlock:{ type:'catches_at_least', value:3000 }, key:'catches1000', perks:{ weightMultiplier:2.5 } },
         { emoji:'🔥', name:'Chapeau Feu', rarity:'rare', unlockText:"Capturer 600 poissons en été", unlock:{ type:'catches_in_season_at_least', season:'summer', value:600 }, key:'summer200', perks:{ summerEffectiveness:1.8 } },
